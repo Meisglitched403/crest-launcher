@@ -1,8 +1,9 @@
 from pathlib import Path
 
 HOME = Path.home()
-CONFIG_DIR = HOME / ".config" / "crest-launcher"
-DATA_DIR = HOME / ".local" / "share" / "crest-launcher"
+BASE_DIR = HOME / ".crestclient"
+CONFIG_DIR = BASE_DIR
+DATA_DIR = BASE_DIR
 INSTANCES_DIR = DATA_DIR / "instances"
 LIBS_DIR = DATA_DIR / "libraries"
 ASSETS_DIR = DATA_DIR / "assets"

@@ -252,6 +252,21 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return _err(self, str(e))
 
+        if parts == ["api", "instance", "create"]:
+            name = body.get("name", "")
+            mc_ver = body.get("mc_version", "")
+            loader = body.get("loader_type", "vanilla")
+            if not name or not mc_ver:
+                return _err(self, "name and mc_version required")
+            try:
+                p = config.INSTANCES_DIR / name
+                p.mkdir(parents=True, exist_ok=True)
+                for sub in ["mods", "saves", "resourcepacks", "server-resourcepacks", "shaderpacks"]:
+                    (p / sub).mkdir(parents=True, exist_ok=True)
+                return _json(self, {"status": "ok", "path": str(p)})
+            except Exception as e:
+                return _err(self, str(e))
+
         return _err(self, f"Not found: {self.path}", 404)
 
 

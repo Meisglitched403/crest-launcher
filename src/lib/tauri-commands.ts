@@ -109,6 +109,12 @@ export async function listMods(modpack: string): Promise<ModResult[]> {
   return api<ModResult[]>("GET", `/mods/list?modpack=${encodeURIComponent(modpack)}`);
 }
 
+export async function createInstance(name: string, mcVersion: string, loaderType: string): Promise<void> {
+  await api<{ status: string }>("POST", "/instance/create", {
+    name, mc_version: mcVersion, loader_type: loaderType,
+  });
+}
+
 export async function toggleMod(
   modpack: string,
   slug: string,

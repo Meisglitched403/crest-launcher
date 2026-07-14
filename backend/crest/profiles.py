@@ -60,7 +60,6 @@ def _save(profile):
 
 
 def _ensure_instance_dir(name):
-    (config.INSTANCES_DIR / name / "mods").mkdir(parents=True, exist_ok=True)
-    (config.INSTANCES_DIR / name / "saves").mkdir(parents=True, exist_ok=True)
-    (config.INSTANCES_DIR / name / "resourcepacks").mkdir(parents=True, exist_ok=True)
-    (config.INSTANCES_DIR / name / "shaderpacks").mkdir(parents=True, exist_ok=True)
+    base = config.INSTANCES_DIR / name
+    for sub in ["mods", "saves", "resourcepacks", "server-resourcepacks", "shaderpacks"]:
+        (base / sub).mkdir(parents=True, exist_ok=True)

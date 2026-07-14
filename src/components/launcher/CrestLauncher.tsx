@@ -76,6 +76,7 @@ import {
   removeMod,
   listMods,
   toggleMod,
+  createInstance,
   type InstalledVersion,
   type ModResult,
 } from "@/lib/tauri-commands";
@@ -698,7 +699,11 @@ function HomeView({
         onClose={() => setShowCreateModpack(false)}
         onCreateModpack={(name, mcVersion, loaderType) => {
           const result = modpacks.addModpack(name, mcVersion, loaderType);
-          if (result) setShowCreateModpack(false);
+          if (result) {
+            // best-effort: create instance folder structure on disk
+            createInstance(name, mcVersion, loaderType).catch(() => {});
+            setShowCreateModpack(false);
+          }
         }}
       />
     )}

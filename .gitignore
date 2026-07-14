@@ -4,6 +4,8 @@ node_modules/
 # Build
 dist/
 target/
+.output/
+.wrangler/
 
 # Python
 __pycache__/

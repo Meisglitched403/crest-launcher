@@ -62,6 +62,7 @@ def launch(profile_name, auth=None):
     # game directory for this profile
     game_dir = config.INSTANCES_DIR / profile_name
     game_dir.mkdir(parents=True, exist_ok=True)
+    profiles._ensure_instance_dir(profile_name)
 
     # build classpath
     classpath = [str(client)] + [str(l) for l in libs]
@@ -231,6 +232,7 @@ def launch_async(profile_name, auth=None):
 
     game_dir = config.INSTANCES_DIR / profile_name
     game_dir.mkdir(parents=True, exist_ok=True)
+    profiles._ensure_instance_dir(profile_name)
 
     classpath = [str(client)] + [str(l) for l in libs]
 
