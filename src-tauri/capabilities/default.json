@@ -1,0 +1,22 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "enables the default permissions",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "http:default",
+    {
+      "identifier": "http:allow-fetch",
+      "allow": [
+        { "url": "https://piston-meta.mojang.com/**" },
+        { "url": "https://meta.fabricmc.net/**" },
+        { "url": "https://depot.neoforged.net/**" },
+        { "url": "https://api.modrinth.com/**" },
+        { "url": "https://cdn.modrinth.com/**" }
+      ]
+    }
+  ]
+}
