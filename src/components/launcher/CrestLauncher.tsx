@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -29,6 +29,7 @@ import {
   Boxes,
   Copy,
   Trash2,
+  Edit,
   RefreshCw,
   AlertTriangle,
   ChevronRight,
@@ -44,14 +45,14 @@ import news2 from "@/assets/news-2.jpg";
 import news3 from "@/assets/news-3.jpg";
 import {
   navItems,
-  servers,
   friends,
   cosmetics,
   rarityColor,
-  crashLogs,
+  modpacks as staticModpacks,
   type NavId,
   type CrashEntry,
   type LiveVersion,
+  type Modpack as StaticModpack,
 } from "./data";
 import { ThemeProvider, ThemeTrigger } from "./ThemeCustomizer";
 import {
@@ -64,8 +65,9 @@ import {
   useOfflineProfiles,
   type OfflineProfile,
 } from "@/hooks/use-offline-profiles";
-import { useModpacks } from "@/hooks/use-modpacks";
+import { useModpacks, type Modpack } from "@/hooks/use-modpacks";
 import {
+  API_BASE,
   installVersion,
   launchGame,
   ensureJava,
@@ -75,10 +77,28 @@ import {
   installMod,
   removeMod,
   listMods,
+  untrackedMods,
+  adoptMod,
   toggleMod,
   createInstance,
+  openModsFolder,
+  fetchServers,
+  addServer,
+  removeServer,
+  pingServer,
+  fetchGameStatus,
+  killGame,
+  signup,
+  login,
+  fetchSession,
+  logout as apiLogout,
+  checkAvailability,
   type InstalledVersion,
   type ModResult,
+  type ServerEntry,
+  type PingResult,
+  type CrestAccount,
+  type SessionResult,
 } from "@/lib/tauri-commands";
 
 export function CrestLauncher() {
@@ -89,10 +109,350 @@ export function CrestLauncher() {
   );
 }
 
+const createModpackModalMixin = {
+  ready: true,
+};
+
+function useModpackCreateModal(modpacks: ReturnType<typeof useModpacks>) {
+  const [open, setOpen] = useState(false);
+  const versions = useVersionData();
+
+  const modal = open ? (
+    <CreateModpackModal
+      versions={versions.versions}
+      versionsLoading={versions.loading}
+      onClose={() => setOpen(false)}
+      onCreateModpack={(name, mcVersion, loaderType) => {
+        const result = modpacks.addModpack(name, mcVersion, loaderType);
+        if (result) {
+          createInstance(name, mcVersion, loaderType).catch(() => {});
+          setOpen(false);
+        }
+      }}
+    />
+  ) : null;
+
+  return { openCreateModal: () => setOpen(true), createModal: modal };
+}
+
+function ModpackActions({ modpack, modpacks }: { modpack: Modpack; modpacks: ReturnType<typeof useModpacks> }) {
+  const [renaming, setRenaming] = useState(false);
+  const [name, setName] = useState(modpack.name);
+
+  const startRename = () => { setName(modpack.name); setRenaming(true); };
+
+  const cancelRename = () => { setName(modpack.name); setRenaming(false); };
+
+  const commitRename = () => {
+    if (name.trim() && name.trim() !== modpack.name) {
+      modpacks.updateModpack(modpack.id, { name: name.trim() });
+    }
+    setRenaming(false);
+  };
+
+  return { renaming, name, setName, startRename, cancelRename, commitRename };
+}
+
+function ModpackCard({ modpack, modpacks }: { modpack: Modpack; modpacks: ReturnType<typeof useModpacks> }) {
+  const rename = ModpackActions({ modpack, modpacks });
+
+  return (
+    <motion.div
+      whileHover={{ y: -4 }}
+      className="glass group relative flex flex-col overflow-hidden rounded-2xl p-5"
+    >
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl gradient-primary">
+            <Boxes className="h-6 w-6 text-primary-foreground" />
+          </div>
+          <div className="min-w-0 flex-1">
+            {rename.renaming ? (
+              <input
+                value={rename.name}
+                onChange={(e) => rename.setName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') rename.commitRename(); if (e.key === 'Escape') rename.cancelRename(); }}
+                className="w-full rounded-md border border-white/20 bg-white/5 px-2 py-0.5 font-display text-base font-semibold outline-none"
+                autoFocus
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <div className="truncate font-display text-base font-semibold leading-tight">
+                {modpack.name}
+              </div>
+            )}
+            <div className="truncate text-[11px] text-muted-foreground">
+              Created {new Date(modpack.createdAt).toLocaleDateString()}
+            </div>
+          </div>
+        </div>
+        {!rename.renaming && (
+          <button
+            onClick={(e) => { e.stopPropagation(); rename.startRename(); }}
+            className="rounded-lg p-1.5 text-muted-foreground hover:bg-white/10"
+            title="Rename"
+          >
+            <Edit className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 text-[11px]">
+        <div className="rounded-md bg-white/[0.03] px-2.5 py-1.5">
+          <div className="text-[9px] uppercase tracking-widest text-muted-foreground">MC</div>
+          <div className="font-mono">{modpack.mcVersion} · {modpack.loaderType}</div>
+        </div>
+        <div className="rounded-md bg-white/[0.03] px-2.5 py-1.5">
+          <div className="text-[9px] uppercase tracking-widest text-muted-foreground">Mods</div>
+          <div className="font-mono">{modpack.mods.length}</div>
+        </div>
+      </div>
+
+      <div className="mt-4 flex gap-2">
+        {rename.renaming ? (
+          <>
+            <button
+              onClick={(e) => { e.stopPropagation(); rename.commitRename(); }}
+              className="flex-1 rounded-xl gradient-primary py-2.5 text-xs font-semibold text-primary-foreground"
+            >
+              Done
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); rename.cancelRename(); }}
+              className="flex-1 rounded-xl border border-white/15 bg-white/5 py-2.5 text-xs text-muted-foreground hover:bg-white/10"
+            >
+              Cancel
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={() => modpacks.selectModpack(modpack.id)}
+              className="flex-1 rounded-xl gradient-primary py-2.5 text-xs font-semibold text-primary-foreground transition hover:scale-[1.02]"
+            >
+              Select
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); modpacks.removeModpack(modpack.id); }}
+              className="rounded-xl border border-white/10 bg-white/5 p-2.5 text-muted-foreground hover:border-red-500/30 hover:bg-red-500/10 hover:text-red-300"
+              title="Remove"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+/* ----------------------------- Login Modal ----------------------------- */
+
+function LoginModal({ onDone, onClose }: { onDone: (s: SessionResult) => void; onClose: () => void }) {
+  const [tab, setTab] = useState<"signin" | "signup">("signin");
+  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [displayMode, setDisplayMode] = useState<"prefix" | "custom">("prefix");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [avail, setAvail] = useState<{ available: boolean; mojangMatch: unknown } | null>(null);
+
+  const displayName = displayMode === "prefix" ? `C_${username}` : username;
+
+  const handleCheck = async () => {
+    if (!username) return;
+    setError("");
+    setAvail(null);
+    try {
+      const r = await checkAvailability(displayName);
+      setAvail(r);
+      if (!r.available) {
+        if (displayMode === "custom") setDisplayMode("prefix");
+        else setError("Display name taken");
+      }
+    } catch { setError("Check failed"); }
+  };
+
+  const handleSubmit = async () => {
+    setError("");
+    if (!email || !password || (tab === "signup" && !username)) { setError("Fill all fields"); return; }
+    setLoading(true);
+    try {
+      const result = tab === "signup"
+        ? await signup(email, username, displayName, password)
+        : await login(email, password);
+      onDone(result);
+    } catch (e: any) {
+      setError(e.message || "Something went wrong");
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="glass-strong w-full max-w-sm overflow-hidden rounded-3xl shadow-2xl"
+      >
+        <div className="flex border-b border-white/5">
+          <button
+            onClick={() => setTab("signin")}
+            className={`flex-1 py-3 text-center text-sm font-semibold transition ${tab === "signin" ? "text-foreground border-b-2 border-primary" : "text-muted-foreground"}`}
+          >
+            Sign In
+          </button>
+          <button
+            onClick={() => setTab("signup")}
+            className={`flex-1 py-3 text-center text-sm font-semibold transition ${tab === "signup" ? "text-foreground border-b-2 border-primary" : "text-muted-foreground"}`}
+          >
+            Create Account
+          </button>
+        </div>
+
+        <div className="space-y-4 p-6">
+          {tab === "signup" && (
+            <>
+              <div>
+                <label className="mb-1 block text-[10px] uppercase tracking-widest text-muted-foreground">Email</label>
+                <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="you@example.com" className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none focus:border-primary/40" />
+              </div>
+              <div>
+                <label className="mb-1 block text-[10px] uppercase tracking-widest text-muted-foreground">Username</label>
+                <input value={username} onChange={(e) => { setUsername(e.target.value); setAvail(null); }} placeholder="Steve" className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none focus:border-primary/40" />
+              </div>
+              <div>
+                <label className="mb-1 block text-[10px] uppercase tracking-widest text-muted-foreground">Display Name</label>
+                <div className="flex gap-2">
+                  <button onClick={() => setDisplayMode("prefix")} className={`flex-1 rounded-xl border px-3 py-2 text-xs font-medium transition ${displayMode === "prefix" ? "border-primary bg-primary/10 text-primary" : "border-white/10 text-muted-foreground"}`}>C_ prefix</button>
+                  <button onClick={() => setDisplayMode("custom")} className={`flex-1 rounded-xl border px-3 py-2 text-xs font-medium transition ${displayMode === "custom" ? "border-primary bg-primary/10 text-primary" : "border-white/10 text-muted-foreground"}`}>Custom name</button>
+                </div>
+                <div className="mt-1.5 text-xs text-muted-foreground">
+                  In-game name: <span className="font-mono text-foreground">{displayName || "—"}</span>
+                  {displayMode === "prefix" && <span className="ml-1 text-[10px] text-muted-foreground/50">(avoids Mojang collision)</span>}
+                </div>
+              </div>
+              {displayName && (displayMode === "custom") && (
+                <button onClick={handleCheck} disabled={loading} className="w-full rounded-xl border border-white/10 px-3 py-2 text-xs font-medium transition hover:bg-white/5 disabled:opacity-50">
+                  Check availability
+                </button>
+              )}
+              {avail && (
+                <div className={`text-xs ${avail.available ? "text-emerald-400" : "text-rose-400"}`}>
+                  {avail.available ? "Name available!" : "Name taken — switched to prefix mode"}
+                </div>
+              )}
+            </>
+          )}
+
+          {tab === "signin" && (
+            <>
+              <div>
+                <label className="mb-1 block text-[10px] uppercase tracking-widest text-muted-foreground">Email</label>
+                <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="you@example.com" className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none focus:border-primary/40" />
+              </div>
+              <div>
+                <label className="mb-1 block text-[10px] uppercase tracking-widest text-muted-foreground">Password</label>
+                <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="••••••••" className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none focus:border-primary/40" />
+              </div>
+            </>
+          )}
+
+          {tab === "signup" && (
+            <div>
+              <label className="mb-1 block text-[10px] uppercase tracking-widest text-muted-foreground">Password</label>
+              <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="••••••••" className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none focus:border-primary/40" />
+            </div>
+          )}
+
+          {error && <div className="text-xs text-rose-400">{error}</div>}
+
+          <button onClick={handleSubmit} disabled={loading} className="w-full rounded-xl gradient-primary py-2.5 text-sm font-semibold text-primary-foreground transition hover:opacity-90 disabled:opacity-50">
+            {loading ? "Please wait…" : tab === "signup" ? "Create Account" : "Sign In"}
+          </button>
+
+          <button onClick={onClose} className="w-full text-xs text-muted-foreground transition hover:text-foreground">
+            Continue without account
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 function CrestLauncherInner() {
   const [active, setActive] = useState<NavId>("home");
   const profiles = useOfflineProfiles();
   const modpacks = useModpacks();
+  const [session, setSession] = useState<SessionResult | null>(null);
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [launching, setLaunching] = useState(false);
+  const [gameRunning, setGameRunning] = useState(false);
+  const [launchStep, setLaunchStep] = useState(0);
+  const [backendOnline, setBackendOnline] = useState(false);
+  const [launchSteps] = useState([
+    "Locating Java runtime…",
+    "Downloading Minecraft version…",
+    "Installing Fabric loader…",
+    "Assembling libraries…",
+    "Preparing game directory…",
+    "Launching game…",
+    "Waiting for window…",
+    "Game running!",
+  ]);
+
+  useEffect(() => {
+    if (!launching) { setLaunchStep(0); return; }
+    if (launchStep >= launchSteps.length - 1) return;
+    const t = setTimeout(() => setLaunchStep((s) => s + 1), Math.random() * 1500 + 600);
+    return () => clearTimeout(t);
+  }, [launching, launchStep, launchSteps.length]);
+
+  useEffect(() => {
+    if (!gameRunning) return;
+    const id = setInterval(async () => {
+      try {
+        const s = await fetchGameStatus();
+        if (!s.alive) setGameRunning(false);
+      } catch { setGameRunning(false); }
+    }, 2000);
+    return () => clearInterval(id);
+  }, [gameRunning]);
+
+  useEffect(() => {
+    fetchSession().then((s) => {
+      if (s && "jwt" in s) setSession(s as SessionResult);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let dead = false;
+    let pending = false;
+    const check = async () => {
+      if (pending) return;
+      pending = true;
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 3000);
+        const res = await fetch(`${API_BASE}/health`, { signal: ctrl.signal });
+        clearTimeout(t);
+        if (!dead) setBackendOnline(res.ok);
+      } catch {
+        if (!dead) setBackendOnline(false);
+      }
+      pending = false;
+    };
+    check();
+    const id = setInterval(check, 5000);
+    return () => { dead = true; clearInterval(id); };
+  }, []);
+
+  const handleCancel = async () => {
+    try { await killGame(); } catch {}
+    setLaunching(false);
+    setGameRunning(false);
+  };
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-background text-foreground">
@@ -110,7 +470,7 @@ function CrestLauncherInner() {
       <div className="flex min-h-screen">
         <Sidebar active={active} setActive={setActive} />
         <div className="flex min-h-screen flex-1 flex-col">
-          <TopBar profiles={profiles} modpacks={modpacks} />
+          <TopBar profiles={profiles} modpacks={modpacks} launching={launching} gameRunning={gameRunning} setGameRunning={setGameRunning} session={session} backendOnline={backendOnline} onLoginClick={() => setShowLoginModal(true)} onLogout={() => { apiLogout().catch(() => {}); setSession(null); }} />
           <main className="flex-1 px-8 pb-8">
             <AnimatePresence mode="wait">
               <motion.div
@@ -120,11 +480,11 @@ function CrestLauncherInner() {
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
               >
-                {active === "home" && <HomeView profiles={profiles} modpacks={modpacks} />}
+                {active === "home" && <HomeView profiles={profiles} modpacks={modpacks} launching={launching} setLaunching={setLaunching} gameRunning={gameRunning} setGameRunning={setGameRunning} session={session} />}
                 {active === "versions" && <VersionsView modpacks={modpacks} />}
                 {active === "modpacks" && <ModpacksView modpacks={modpacks} />}
                 {active === "mods" && <ModsView modpacks={modpacks} />}
-                {active === "servers" && <ServersView />}
+                {active === "servers" && <ServersView launching={launching} setLaunching={setLaunching} gameRunning={gameRunning} setGameRunning={setGameRunning} session={session} />}
                 {active === "cosmetics" && <CosmeticsView />}
                 {active === "performance" && <PerformanceView />}
                 {active === "crashes" && <CrashLogsView />}
@@ -137,6 +497,13 @@ function CrestLauncherInner() {
           </main>
         </div>
       </div>
+
+      {showLoginModal && (
+        <LoginModal
+          onDone={(s) => { setSession(s as SessionResult); setShowLoginModal(false); }}
+          onClose={() => setShowLoginModal(false)}
+        />
+      )}
     </div>
   );
 }
@@ -291,9 +658,23 @@ function useVersionData() {
 function TopBar({
   profiles,
   modpacks,
+  launching,
+  gameRunning,
+  setGameRunning,
+  session,
+  backendOnline,
+  onLoginClick,
+  onLogout,
 }: {
   profiles: ReturnType<typeof useOfflineProfiles>;
   modpacks: ReturnType<typeof useModpacks>;
+  launching: boolean;
+  gameRunning: boolean;
+  setGameRunning: (v: boolean) => void;
+  session: SessionResult | null;
+  backendOnline: boolean;
+  onLoginClick: () => void;
+  onLogout: () => void;
 }) {
   const [profileOpen, setProfileOpen] = useState(false);
   const [newUsername, setNewUsername] = useState("");
@@ -317,6 +698,20 @@ function TopBar({
         <Bell className="h-4 w-4" />
       </button>
 
+      {gameRunning && (
+        <button
+          onClick={() => setGameRunning(false)}
+          className="glass flex items-center gap-2 rounded-full px-3 py-2 text-xs"
+        >
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+          </span>
+          <span className="font-medium text-emerald-300">Running</span>
+          <X className="h-3 w-3 text-muted-foreground" />
+        </button>
+      )}
+
       {/* Modpack indicator */}
       {modpacks.activeModpack && (
         <div className="glass flex items-center gap-2 rounded-full px-3 py-2 text-xs">
@@ -328,22 +723,38 @@ function TopBar({
         </div>
       )}
 
+      {/* API status */}
+      <span className="glass flex items-center gap-1.5 rounded-full px-3 py-2 text-[11px]">
+        <span className={`h-1.5 w-1.5 rounded-full ${backendOnline ? "bg-emerald-400" : "bg-rose-400"}`} />
+        <span className={backendOnline ? "text-emerald-400" : "text-rose-400"}>
+          {backendOnline ? "API" : "API off"}
+        </span>
+      </span>
+
       {/* Profile selector */}
       <div className="relative">
         <button
           onClick={() => setProfileOpen(!profileOpen)}
           className="glass flex items-center gap-3 rounded-full py-1.5 pl-1.5 pr-3"
         >
+          {gameRunning && (
+            <span className="absolute -right-1 -top-1 flex h-3 w-3">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex h-3 w-3 rounded-full bg-emerald-400" />
+            </span>
+          )}
           <div className="grid h-8 w-8 place-items-center rounded-full gradient-primary text-xs font-bold text-primary-foreground">
-            {profiles.activeProfile
-              ? initials(profiles.activeProfile.username)
-              : "??"}
+            {session
+              ? initials(session.account.display_name)
+              : "?"}
           </div>
           <div className="text-left">
             <div className="text-xs font-semibold leading-tight">
-              {profiles.activeProfile?.username ?? "No profile"}
+              {session ? session.account.display_name : "Not signed in"}
             </div>
-            <div className="text-[10px] text-emerald-400">Offline · Local</div>
+            <div className={`text-[10px] ${session ? "text-emerald-400" : "text-muted-foreground"}`}>
+              {session ? "Crest Account" : "Offline"}
+            </div>
           </div>
           <ChevronDown className="h-4 w-4 text-muted-foreground" />
         </button>
@@ -357,75 +768,42 @@ function TopBar({
               transition={{ duration: 0.15 }}
               className="glass-strong absolute right-0 top-full mt-2 w-72 overflow-hidden rounded-2xl"
             >
-              <div className="border-b border-white/5 p-3">
-                <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
-                  Offline Profiles
-                </div>
-                <div className="flex gap-1.5">
-                  <input
-                    value={newUsername}
-                    onChange={(e) => setNewUsername(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && newUsername.trim()) {
-                        profiles.addProfile(newUsername.trim());
-                        setNewUsername("");
-                      }
-                    }}
-                    placeholder="New username…"
-                    className="flex-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs outline-none placeholder:text-muted-foreground"
-                  />
-                  <button
-                    onClick={() => {
-                      if (newUsername.trim()) {
-                        profiles.addProfile(newUsername.trim());
-                        setNewUsername("");
-                      }
-                    }}
-                    className="rounded-lg gradient-primary px-2.5 py-1.5 text-xs font-semibold text-primary-foreground"
-                  >
-                    <Plus className="h-3 w-3" />
-                  </button>
-                </div>
-              </div>
-              <div className="max-h-48 overflow-y-auto">
-                {profiles.profiles.length === 0 && (
-                  <div className="p-4 text-center text-xs text-muted-foreground">
-                    No profiles yet — type a username above
-                  </div>
-                )}
-                {profiles.profiles.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => {
-                      profiles.selectProfile(p.id);
-                      setProfileOpen(false);
-                    }}
-                    className={`flex w-full items-center gap-3 px-3 py-2.5 transition hover:bg-white/5 ${p.id === profiles.activeId ? "bg-white/[0.06]" : ""}`}
-                  >
-                    <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full gradient-primary text-[10px] font-bold text-primary-foreground">
-                      {initials(p.username)}
-                    </div>
-                    <div className="flex-1 text-left">
-                      <div className="text-xs font-semibold">{p.username}</div>
-                      <div className="text-[10px] text-muted-foreground">
-                        Last used {new Date(p.lastUsed).toLocaleDateString()}
+              {session ? (
+                <>
+                  <div className="border-b border-white/5 p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="grid h-10 w-10 place-items-center rounded-full gradient-primary text-sm font-bold text-primary-foreground">
+                        {initials(session.account.display_name)}
+                      </div>
+                      <div>
+                        <div className="text-sm font-semibold">{session.account.display_name}</div>
+                        <div className="text-[11px] text-muted-foreground">Crest Account</div>
                       </div>
                     </div>
-                    {p.id === profiles.activeId && (
-                      <Check className="h-3.5 w-3.5 text-primary" />
-                    )}
+                  </div>
+                  <div className="p-2">
                     <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        profiles.removeProfile(p.id);
-                      }}
-                      className="rounded p-1 text-muted-foreground hover:bg-white/10 hover:text-rose-300"
+                      onClick={() => { apiLogout(); setProfileOpen(false); window.location.reload(); }}
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-muted-foreground transition hover:bg-white/5"
                     >
-                      <Trash2 className="h-3 w-3" />
+                      <LogOut className="h-4 w-4" /> Sign out
                     </button>
+                  </div>
+                </>
+              ) : (
+                <div className="p-4 space-y-2">
+                  <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Account</div>
+                  <button
+                    onClick={() => { setProfileOpen(false); onLoginClick(); }}
+                    className="flex w-full items-center gap-2 rounded-xl gradient-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:opacity-90"
+                  >
+                    Sign in / Create account
                   </button>
-                ))}
-              </div>
+                  <p className="text-[10px] text-muted-foreground leading-relaxed">
+                    Sign in to use your Crest account across devices with a persistent identity and UUID.
+                  </p>
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>
@@ -439,32 +817,26 @@ function TopBar({
 function HomeView({
   profiles,
   modpacks,
+  launching,
+  setLaunching,
+  gameRunning,
+  setGameRunning,
+  session,
 }: {
   profiles: ReturnType<typeof useOfflineProfiles>;
   modpacks: ReturnType<typeof useModpacks>;
+  launching: boolean;
+  setLaunching: (v: boolean) => void;
+  gameRunning: boolean;
+  setGameRunning: (v: boolean) => void;
+  session: SessionResult | null;
 }) {
   const { versions, loading: versionsLoading } = useVersionData();
   const [ram, setRam] = useState(8);
-  const [launching, setLaunching] = useState(false);
   const [progress, setProgress] = useState(0);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [showCreateModpack, setShowCreateModpack] = useState(false);
-  const [backendOnline, setBackendOnline] = useState(false);
-
-  useEffect(() => {
-    let dead = false;
-    const check = async () => {
-      try {
-        const res = await fetch("http://127.0.0.1:8765/api/health");
-        if (!dead) setBackendOnline(res.ok);
-      } catch {
-        if (!dead) setBackendOnline(false);
-      }
-    };
-    check();
-    const id = setInterval(check, 5000);
-    return () => { dead = true; clearInterval(id); };
-  }, []);
+  const [homeSelectorOpen, setHomeSelectorOpen] = useState(false);
 
   const active = modpacks.activeModpack;
   const badVersion = active && !/^\d+\.\d+(\.\d+)?$/.test(active.mcVersion);
@@ -483,12 +855,13 @@ function HomeView({
       // installVersion returns the actual version ID (for Fabric: fabric-loader-{ver}-{mc})
       const installedId = await installVersion(active.mcVersion, active.loaderType);
       setProgress(80);
-      await launchGame(installedId, profiles.activeProfile.username, ram * 1024, active.name);
+      await launchGame(installedId, Number(ram) * 1024, active.name, session?.account?.id);
       setProgress(100);
-      setTimeout(() => setLaunching(false), 600);
+      setGameRunning(true);
+      setLaunching(false);
     } catch (err) {
       if (err instanceof TypeError && (err.message === "Failed to fetch" || err.message.includes("fetch"))) {
-        setLaunchError("Backend server not reachable on port 8765");
+        setLaunchError("API unreachable — make sure the backend is running (scripts/dev.sh)");
       } else {
         setLaunchError(String(err));
       }
@@ -510,15 +883,11 @@ function HomeView({
           <span className="text-foreground">
             {profiles.activeProfile?.username ?? "Unknown"}
           </span>
-          <span className="rounded-full bg-white/10 px-1.5 py-0.5 text-[9px]">
-            OFFLINE
+          <span className={`rounded-full px-1.5 py-0.5 text-[9px] ${session ? "bg-emerald-500/20 text-emerald-400" : "bg-white/10 text-muted-foreground"}`}>
+            {session ? "Crest Account" : "Offline"}
           </span>
         </div>
         <div className="hidden items-center gap-4 text-[11px] text-muted-foreground sm:flex">
-          <span className="inline-flex items-center gap-1.5">
-            <span className={`h-1.5 w-1.5 rounded-full ${backendOnline ? "bg-emerald-400" : "bg-rose-400"}`} />
-            {backendOnline ? "API" : "API off"}
-          </span>
           <span>
             Java <span className="font-mono text-foreground/80">21</span>
           </span>
@@ -560,7 +929,7 @@ function HomeView({
             </div>
           </div>
         ) : (
-          <div className="mx-auto max-w-2xl">
+          <div className="mx-auto max-w-xl">
             <div className="mb-3 flex items-center justify-between">
               <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Modpacks</div>
               <button
@@ -570,35 +939,71 @@ function HomeView({
                 <Plus className="h-3 w-3" /> New
               </button>
             </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {modpacks.modpacks.map((mp) => (
-                <button
-                  key={mp.id}
-                  onClick={() => modpacks.selectModpack(mp.id)}
-                  className={`glass flex items-center gap-3 rounded-xl px-4 py-3 text-left transition ${
-                    mp.id === active?.id
-                      ? "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.2)]"
-                      : "hover:bg-white/[0.04]"
-                  }`}
-                >
-                  <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg gradient-primary">
-                    <Boxes className="h-5 w-5 text-primary-foreground" />
+
+            <div className="relative">
+              <button
+                onClick={() => setHomeSelectorOpen(!homeSelectorOpen)}
+                className={`glass flex w-full items-center gap-4 rounded-2xl px-5 py-4 text-left transition ${
+                  homeSelectorOpen ? "ring-2 ring-primary/40" : "hover:bg-white/[0.04]"
+                }`}
+              >
+                <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl gradient-primary">
+                  <Boxes className="h-6 w-6 text-primary-foreground" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="truncate text-base font-semibold">{active!.name}</div>
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <span>{active!.mcVersion}</span>
+                    <span>·</span>
+                    <span className={active!.loaderType === "fabric" ? "text-violet-400" : "text-sky-400"}>
+                      {active!.loaderType === "fabric" ? "Fabric" : "Vanilla"}
+                    </span>
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-semibold">{mp.name}</div>
-                    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                      <span>{mp.mcVersion}</span>
-                      <span>·</span>
-                      <span className={mp.loaderType === "fabric" ? "text-violet-400" : "text-sky-400"}>
-                        {mp.loaderType === "fabric" ? "Fabric" : "Vanilla"}
-                      </span>
+                </div>
+                <ChevronDown className="h-5 w-5 shrink-0 text-muted-foreground" />
+              </button>
+
+              <AnimatePresence>
+                {homeSelectorOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -8, scale: 0.97 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -8, scale: 0.97 }}
+                    transition={{ duration: 0.15 }}
+                    className="glass-strong absolute left-0 right-0 top-full z-50 mt-2 overflow-hidden rounded-2xl shadow-xl"
+                  >
+                    <div className="max-h-72 overflow-y-auto p-2">
+                      {modpacks.modpacks.map((mp) => {
+                        const isActive = mp.id === modpacks.activeId;
+                        return (
+                          <button
+                            key={mp.id}
+                            onClick={() => { modpacks.selectModpack(mp.id); setHomeSelectorOpen(false); }}
+                            className={`flex w-full items-center gap-4 rounded-xl px-4 py-3.5 text-left transition ${
+                              isActive ? "bg-primary/15 ring-1 ring-primary/30" : "hover:bg-white/5"
+                            }`}
+                          >
+                            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl gradient-primary">
+                              <Boxes className="h-5 w-5 text-primary-foreground" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="truncate text-sm font-semibold">{mp.name}</div>
+                              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <span>{mp.mcVersion}</span>
+                                <span>·</span>
+                                <span className={mp.loaderType === "fabric" ? "text-violet-400" : "text-sky-400"}>
+                                  {mp.loaderType === "fabric" ? "Fabric" : "Vanilla"}
+                                </span>
+                              </div>
+                            </div>
+                            {isActive && <Check className="h-5 w-5 shrink-0 text-primary" />}
+                          </button>
+                        );
+                      })}
                     </div>
-                  </div>
-                  {mp.id === active?.id && (
-                    <Check className="h-4 w-4 shrink-0 text-primary" />
-                  )}
-                </button>
-              ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
         )}
@@ -608,7 +1013,7 @@ function HomeView({
           <>
             <button
               onClick={handleLaunch}
-              disabled={launching || !profiles.activeProfile}
+              disabled={launching || gameRunning || !profiles.activeProfile}
               className="group relative mx-auto mt-8 flex h-20 w-20 items-center justify-center rounded-full gradient-primary text-primary-foreground shadow-[var(--shadow-glow)] transition hover:scale-105 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
               aria-label="Launch game"
             >
@@ -618,6 +1023,13 @@ function HomeView({
               )}
               {launching ? (
                 <span className="font-mono text-xs font-semibold">{progress}%</span>
+              ) : gameRunning ? (
+                <span className="flex items-center gap-1">
+                  <span className="relative flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
+                  </span>
+                </span>
               ) : (
                 <Play className="h-7 w-7 fill-current" />
               )}
@@ -1027,23 +1439,95 @@ type SearchResult = {
   description: string;
   downloads: number;
   follows: number;
+  icon_url?: string;
   categories: string[];
   versions: string[];
 };
 
 function ModsView({ modpacks }: { modpacks: ReturnType<typeof useModpacks> }) {
   const active = modpacks.activeModpack;
+  const [modsTab, setModsTab] = useState<"installed" | "browse">("installed");
+  const prevActiveId = useRef(modpacks.activeId);
+  if (prevActiveId.current !== modpacks.activeId) {
+    prevActiveId.current = modpacks.activeId;
+    setModsTab("installed");
+  }
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [installedMods, setInstalledMods] = useState<ModResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [installing, setInstalling] = useState<string | null>(null);
+  const [selectorOpen, setSelectorOpen] = useState(false);
+  const [modIcons, setModIcons] = useState<Record<string, string>>({});
+  const [untracked, setUntracked] = useState<{filename: string}[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [browseSection, setBrowseSection] = useState<"popular"|"pvp"|"optimization"|"utility"|"magic"|"combat"|"search">("popular");
+
+  const BROWSE_SECTIONS = useMemo(() => [
+    { id: "popular" as const, label: "Popular", categories: "" },
+    { id: "pvp" as const, label: "PvP", categories: "pvp" },
+    { id: "optimization" as const, label: "Optimization", categories: "optimization" },
+    { id: "utility" as const, label: "Utility", categories: "utility" },
+    { id: "magic" as const, label: "Magic", categories: "magic" },
+    { id: "combat" as const, label: "Combat", categories: "combat" },
+  ], []);
+
+  const doBrowseFetch = useCallback(async (section: typeof browseSection) => {
+    if (section === "search") return;
+    const cfg = BROWSE_SECTIONS.find((s) => s.id === section);
+    if (!cfg) return;
+    setSearching(true);
+    setSearchResults([]);
+    try {
+      const results = await searchMods(
+        "",
+        active?.mcVersion,
+        "fabric",
+        20,
+        cfg.categories || undefined,
+      );
+      setSearchResults(results);
+    } catch { setSearchResults([]); }
+    setSearching(false);
+  }, [active?.mcVersion, BROWSE_SECTIONS]);
+
+  const prevSection = useRef(browseSection);
+  useEffect(() => {
+    if (modsTab === "browse" && browseSection !== "search") {
+      if (prevSection.current !== browseSection || searchResults.length === 0) {
+        doBrowseFetch(browseSection);
+      }
+    }
+    prevSection.current = browseSection;
+  }, [modsTab, browseSection, doBrowseFetch, searchResults.length]);
+
+  const loadMods = useCallback(async () => {
+    if (!active) return;
+    setLoading(true);
+    try {
+      const [installed, ut] = await Promise.all([
+        listMods(active.name),
+        untrackedMods(active.name),
+      ]);
+      setInstalledMods(installed);
+      setUntracked(ut);
+    } catch {}
+    setLoading(false);
+  }, [active]);
 
   useEffect(() => {
-    if (active) {
-      listMods(active.name).then(setInstalledMods).catch(() => {});
+    loadMods();
+  }, [loadMods]);
+
+  useEffect(() => {
+    for (const m of installedMods) {
+      if (modIcons[m.slug]) continue;
+      fetch(`${API_BASE}/icon?project=${m.slug}`)
+        .then((r) => r.json())
+        .then((d) => { if (d.icon_url) setModIcons((prev) => ({ ...prev, [m.slug]: d.icon_url })); })
+        .catch(() => {});
     }
-  }, [active]);
+  }, [installedMods, modIcons]);
 
   const isInstalled = (slug: string) => installedMods.some((m) => m.slug === slug);
 
@@ -1100,6 +1584,71 @@ function ModsView({ modpacks }: { modpacks: ReturnType<typeof useModpacks> }) {
       <Header
         title="Mods & Add-ons"
         subtitle={active ? `Mods for ${active.name}` : "Select a modpack to manage mods."}
+        action={
+          active ? (
+            <div className="flex items-center gap-2">
+              <button onClick={loadMods} disabled={loading} className="glass flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs transition hover:bg-white/10 disabled:opacity-50">
+                <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Reload
+              </button>
+              <div className="relative">
+                <button
+                  onClick={() => setSelectorOpen(!selectorOpen)}
+                  className={`glass flex items-center gap-3 rounded-xl px-3 py-2 text-left transition hover:bg-white/10 ${selectorOpen ? "ring-2 ring-primary" : ""}`}
+                >
+                  <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg gradient-primary">
+                    <Boxes className="h-4 w-4 text-primary-foreground" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="truncate text-xs font-semibold leading-tight">{active.name}</div>
+                    <div className="text-[10px] text-muted-foreground">{active.mcVersion} · {active.loaderType === "fabric" ? "Fabric" : "Vanilla"}</div>
+                  </div>
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                </button>
+                <AnimatePresence>
+                  {selectorOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -4, scale: 0.97 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -4, scale: 0.97 }}
+                      transition={{ duration: 0.12 }}
+                      className="glass-strong absolute right-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-2xl shadow-xl"
+                    >
+                      <div className="max-h-64 overflow-y-auto p-1.5">
+                        {modpacks.modpacks.map((mp) => {
+                          const isActive = mp.id === modpacks.activeId;
+                          return (
+                            <button
+                              key={mp.id}
+                              onClick={() => { modpacks.selectModpack(mp.id); setSelectorOpen(false); }}
+                              className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${
+                                isActive ? "bg-primary/15 ring-1 ring-primary/30" : "hover:bg-white/5"
+                              }`}
+                            >
+                              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg gradient-primary">
+                                <Boxes className="h-4 w-4 text-primary-foreground" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="truncate text-xs font-semibold">{mp.name}</div>
+                                <div className="text-[10px] text-muted-foreground">{mp.mcVersion} · {mp.loaderType === "fabric" ? "Fabric" : "Vanilla"}</div>
+                              </div>
+                              {isActive && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+              <button
+                onClick={() => openModsFolder(active.name)}
+                className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium transition hover:bg-white/10"
+              >
+                <Folder className="h-3.5 w-3.5" /> Open Folder
+              </button>
+            </div>
+          ) : undefined
+        }
       />
 
       {!active && (
@@ -1110,134 +1659,268 @@ function ModsView({ modpacks }: { modpacks: ReturnType<typeof useModpacks> }) {
       )}
 
       {active && (
-        <>
-          {/* Search */}
-          <div className="glass flex items-center gap-2 rounded-2xl px-4 py-3">
-            <Search className="h-4 w-4 text-muted-foreground" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={`Search Modrinth for ${active.mcVersion} Fabric mods…`}
-              className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-            />
-            {searching && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
-          </div>
-
-          {/* Installed mods */}
-          {installedMods.length > 0 && (
-            <div>
-              <div className="mb-3 text-[10px] uppercase tracking-widest text-muted-foreground">
-                Installed ({installedMods.length})
-              </div>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                {installedMods.map((m) => (
-                  <div key={m.slug} className="glass flex items-center gap-4 rounded-2xl p-4">
-                    <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl gradient-primary">
-                      <Shield className="h-5 w-5 text-primary-foreground" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="truncate text-sm font-semibold">{m.slug}</div>
-                      <div className="text-xs text-muted-foreground">v{m.version_id?.slice(0, 8)}</div>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => handleToggle(m.slug)}
-                        className={`relative h-5 w-9 rounded-full transition ${m.enabled ? "gradient-primary" : "bg-white/10"}`}
-                      >
-                        <motion.div
-                          layout
-                          transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                          className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow ${m.enabled ? "left-[18px]" : "left-0.5"}`}
-                        />
-                      </button>
-                      <button
-                        onClick={() => handleRemove(m.slug)}
-                        className="rounded-lg bg-white/5 p-1.5 text-muted-foreground hover:bg-rose-500/20 hover:text-rose-300"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
+        <div className="flex gap-6 items-start">
+          {/* Main content */}
+          <div className="flex-1 space-y-6">
+            {modsTab === "installed" && (
+              <>
+                {installedMods.length === 0 && untracked.length === 0 ? (
+                  <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground">
+                    <Shield className="h-10 w-10 opacity-30" />
+                    <p className="text-sm">No mods installed yet. Switch to Browse to search Modrinth.</p>
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Search results */}
-          {searchResults.length > 0 && (
-            <div>
-              <div className="mb-3 text-[10px] uppercase tracking-widest text-muted-foreground">
-                Search results
-              </div>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                {searchResults.map((m) => {
-                  const installed = isInstalled(m.slug);
-                  return (
-                    <motion.div
-                      key={m.slug}
-                      whileHover={{ y: -2 }}
-                      className="glass group relative overflow-hidden rounded-2xl p-4"
-                    >
-                      <div className="flex items-start gap-4">
-                        <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl gradient-primary">
-                          <Shield className="h-6 w-6 text-primary-foreground" />
+                ) : (
+                  <>
+                    {installedMods.length > 0 && (
+                      <div>
+                        <div className="mb-3 text-[10px] uppercase tracking-widest text-muted-foreground">
+                          Installed ({installedMods.length})
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <div className="font-display text-base font-semibold truncate">
-                                {m.title}
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                          {installedMods.map((m) => (
+                            <div key={m.slug} className="glass flex items-center gap-4 rounded-2xl p-4">
+                              {modIcons[m.slug] ? (
+                                <img src={modIcons[m.slug]} className="h-10 w-10 shrink-0 rounded-xl object-cover" />
+                              ) : (
+                                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl gradient-primary">
+                                  <Shield className="h-5 w-5 text-primary-foreground" />
+                                </div>
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <div className="truncate text-sm font-semibold">{m.slug}</div>
+                                <div className="text-xs text-muted-foreground">v{m.version_id?.slice(0, 8)}</div>
                               </div>
-                              <div className="text-xs text-muted-foreground">
-                                {m.author} · {m.downloads?.toLocaleString()} downloads
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  onClick={() => handleToggle(m.slug)}
+                                  className={`relative h-5 w-9 rounded-full transition ${m.enabled ? "gradient-primary" : "bg-white/10"}`}
+                                >
+                                  <motion.div
+                                    layout
+                                    transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                                    className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow ${m.enabled ? "left-[18px]" : "left-0.5"}`}
+                                  />
+                                </button>
+                                <button
+                                  onClick={() => handleRemove(m.slug)}
+                                  className="rounded-lg bg-white/5 p-1.5 text-muted-foreground hover:bg-rose-500/20 hover:text-rose-300"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
                               </div>
                             </div>
-                          </div>
-                          <p className="mt-1.5 text-sm text-muted-foreground line-clamp-2">
-                            {m.description}
-                          </p>
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            {(m.categories || []).slice(0, 3).map((t: string) => (
-                              <span
-                                key={t}
-                                className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground"
-                              >
-                                {t}
-                              </span>
-                            ))}
-                          </div>
-                          <div className="mt-3">
-                            {installed ? (
-                              <button
-                                onClick={() => handleRemove(m.slug)}
-                                className="flex items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-300 hover:bg-rose-500/20"
-                              >
-                                <Trash2 className="h-3 w-3" /> Remove
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => handleInstall(m.slug)}
-                                disabled={installing === m.slug}
-                                className="flex items-center gap-1.5 rounded-lg gradient-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:scale-105 transition disabled:opacity-50"
-                              >
-                                {installing === m.slug ? (
-                                  <Loader2 className="h-3 w-3 animate-spin" />
-                                ) : (
-                                  <Download className="h-3 w-3" />
-                                )}
-                                Install
-                              </button>
-                            )}
-                          </div>
+                          ))}
                         </div>
                       </div>
-                    </motion.div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </>
+                    )}
+
+                    {untracked.length > 0 && (
+                      <div>
+                        <div className="mb-3 text-[10px] uppercase tracking-widest text-muted-foreground">
+                          Manually added ({untracked.length}) <span className="text-[9px] text-muted-foreground/50">— .jar files in mods folder not tracked in profile</span>
+                        </div>
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                          {untracked.map((u) => (
+                            <div key={u.filename} className="glass flex items-center gap-4 rounded-2xl p-4">
+                              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/5">
+                                <Shield className="h-5 w-5 text-muted-foreground" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="truncate text-sm font-semibold">{u.filename}</div>
+                                <div className="text-xs text-muted-foreground">Manual install</div>
+                              </div>
+                              <button
+                                onClick={async () => {
+                                  if (!active) return;
+                                  try {
+                                    await adoptMod(active.name, u.filename);
+                                    loadMods();
+                                  } catch {}
+                                }}
+                                className="rounded-lg bg-primary/15 px-3 py-1.5 text-xs font-medium text-primary transition hover:bg-primary/25"
+                              >
+                                Adopt
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+
+            {modsTab === "browse" && (
+              <>
+                {/* Section buttons */}
+                <div className="flex flex-wrap gap-2">
+                  {BROWSE_SECTIONS.map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => setBrowseSection(s.id)}
+                      className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+                        browseSection === s.id
+                          ? "gradient-primary text-primary-foreground shadow"
+                          : "glass text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setBrowseSection("search")}
+                    className={`flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-medium transition ${
+                      browseSection === "search"
+                        ? "gradient-primary text-primary-foreground shadow"
+                        : "glass text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <Search className="h-4 w-4" /> Search
+                  </button>
+                </div>
+
+                {browseSection === "search" && (
+                  <div className="glass flex items-center gap-2 rounded-2xl px-4 py-3">
+                    <Search className="h-4 w-4 text-muted-foreground" />
+                    <input
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder={`Search Modrinth for ${active.mcVersion} Fabric mods…`}
+                      className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                    />
+                    {searching && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+                  </div>
+                )}
+
+                {searching && searchResults.length === 0 && (
+                  <div className="flex items-center justify-center py-16">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                )}
+
+                {!searching && searchResults.length === 0 && browseSection === "search" && !query.trim() && (
+                  <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground">
+                    <Search className="h-10 w-10 opacity-30" />
+                    <p className="text-sm">Type a query to search Modrinth.</p>
+                  </div>
+                )}
+
+                {!searching && searchResults.length === 0 && browseSection === "search" && query.trim() && (
+                  <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground">
+                    <Search className="h-10 w-10 opacity-30" />
+                    <p className="text-sm">No results found for "{query}".</p>
+                  </div>
+                )}
+
+                {!searching && searchResults.length === 0 && browseSection !== "search" && (
+                  <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground">
+                    <Shield className="h-10 w-10 opacity-30" />
+                    <p className="text-sm">No mods found in this category.</p>
+                  </div>
+                )}
+
+                {searchResults.length > 0 && (
+                  <div>
+                    <div className="mb-3 text-[10px] uppercase tracking-widest text-muted-foreground">
+                      {browseSection === "search" ? `Results for "${query}"` : BROWSE_SECTIONS.find((s) => s.id === browseSection)?.label ?? "Mods"}
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      {searchResults.map((m) => {
+                        const installed = isInstalled(m.slug);
+                        return (
+                          <motion.div
+                            key={m.slug}
+                            whileHover={{ y: -2 }}
+                            className="glass group relative overflow-hidden rounded-2xl p-4"
+                          >
+                            <div className="flex items-start gap-4">
+                              {m.icon_url ? (
+                                <img src={m.icon_url} className="h-12 w-12 shrink-0 rounded-xl object-cover" />
+                              ) : (
+                                <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl gradient-primary">
+                                  <Shield className="h-6 w-6 text-primary-foreground" />
+                                </div>
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <div className="font-display text-base font-semibold truncate">
+                                      {m.title}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                      {m.author} · {m.downloads?.toLocaleString()} downloads
+                                    </div>
+                                  </div>
+                                </div>
+                                <p className="mt-1.5 text-sm text-muted-foreground line-clamp-2">
+                                  {m.description}
+                                </p>
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                  {(m.categories || []).slice(0, 3).map((t: string) => (
+                                    <span
+                                      key={t}
+                                      className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground"
+                                    >
+                                      {t}
+                                    </span>
+                                  ))}
+                                </div>
+                                <div className="mt-3">
+                                  {installed ? (
+                                    <button
+                                      onClick={() => handleRemove(m.slug)}
+                                      className="flex items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-300 hover:bg-rose-500/20"
+                                    >
+                                      <Trash2 className="h-3 w-3" /> Remove
+                                    </button>
+                                  ) : (
+                                    <button
+                                      onClick={() => handleInstall(m.slug)}
+                                      disabled={installing === m.slug}
+                                      className="flex items-center gap-1.5 rounded-lg gradient-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:scale-105 transition disabled:opacity-50"
+                                    >
+                                      {installing === m.slug ? (
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                      ) : (
+                                        <Download className="h-3 w-3" />
+                                      )}
+                                      Install
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Right sidebar tabs */}
+          <div className="glass flex shrink-0 flex-col gap-1 rounded-2xl p-1">
+            <button
+              onClick={() => setModsTab("installed")}
+              className={`rounded-xl px-4 py-2.5 text-sm font-medium transition ${
+                modsTab === "installed" ? "gradient-primary text-primary-foreground shadow" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Installed{installedMods.length > 0 ? ` (${installedMods.length})` : ""}
+            </button>
+            <button
+              onClick={() => setModsTab("browse")}
+              className={`rounded-xl px-4 py-2.5 text-sm font-medium transition ${
+                modsTab === "browse" ? "gradient-primary text-primary-foreground shadow" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Browse
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -1245,68 +1928,240 @@ function ModsView({ modpacks }: { modpacks: ReturnType<typeof useModpacks> }) {
 
 /* ------------------------------ Servers ------------------------------- */
 
-function ServersView() {
+function ServersView({
+  launching,
+  setLaunching,
+  gameRunning,
+  setGameRunning,
+  session,
+}: {
+  launching: boolean;
+  setLaunching: (v: boolean) => void;
+  gameRunning: boolean;
+  setGameRunning: (v: boolean) => void;
+  session: SessionResult | null;
+}) {
+  const [serversList, setServersList] = useState<ServerEntry[]>([]);
+  const [pings, setPings] = useState<Record<string, number | null>>({});
+  const [showAdd, setShowAdd] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newAddr, setNewAddr] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const [renameVal, setRenameVal] = useState("");
+  const profiles = useOfflineProfiles();
+  const modpacks = useModpacks();
+
+  const refresh = useCallback(async () => {
+    try { setServersList(await fetchServers()); } catch {}
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const handleAdd = async () => {
+    if (!newName.trim() || !newAddr.trim()) return;
+    try {
+      await addServer(newName.trim(), newAddr.trim());
+      setNewName("");
+      setNewAddr("");
+      setShowAdd(false);
+      refresh();
+    } catch {}
+  };
+
+  const handleRemove = async (addr: string) => {
+    try { await removeServer(addr); refresh(); } catch {}
+  };
+
+  const handlePing = async (addr: string) => {
+    try {
+      const r = await pingServer(addr);
+      setPings((prev) => ({ ...prev, [addr]: r.ping_ms }));
+    } catch {
+      setPings((prev) => ({ ...prev, [addr]: null }));
+    }
+  };
+
+  const handleRename = async (addr: string) => {
+    if (renameVal.trim() && renameVal !== serversList.find((s) => s.address === addr)?.name) {
+      await removeServer(addr);
+      await addServer(renameVal.trim(), addr);
+      refresh();
+    }
+    setRenameId(null);
+  };
+
+  const handleJoin = async (addr: string) => {
+    if (launching || gameRunning) return;
+    const active = modpacks.activeModpack;
+    if (!active || !profiles.activeProfile) return;
+    setLaunching(true);
+    try {
+      await installVersion(active.mcVersion, active.loaderType);
+      await launchGame(active.mcVersion, 4096, active.name, session?.account?.id, undefined, addr);
+      setGameRunning(true);
+    } catch {}
+    setLaunching(false);
+  };
+
   return (
     <div className="space-y-6">
       <Header
         title="Servers"
-        subtitle="Your saved servers and one-click featured lobbies."
+        subtitle="Your saved servers — add, ping, and join directly."
         action={
-          <button className="flex items-center gap-1.5 rounded-full gradient-primary px-4 py-2 text-xs font-medium text-primary-foreground">
+          <button
+            onClick={() => setShowAdd(!showAdd)}
+            className="flex items-center gap-1.5 rounded-full gradient-primary px-4 py-2 text-xs font-medium text-primary-foreground"
+          >
             <Plus className="h-3 w-3" /> Add Server
           </button>
         }
       />
-      <div className="grid grid-cols-1 gap-4">
-        {servers.map((s) => (
+
+      <AnimatePresence>
+        {showAdd && (
           <motion.div
-            key={s.name}
-            whileHover={{ x: 4 }}
-            className="glass flex items-center gap-5 rounded-2xl p-5"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
           >
-            <div className="grid h-14 w-14 place-items-center rounded-xl gradient-primary">
-              <ServerIcon className="h-6 w-6 text-primary-foreground" />
-            </div>
-            <div className="flex-1">
-              <div className="flex items-center gap-2">
-                <span className="font-display text-lg font-semibold">
-                  {s.name}
-                </span>
-                {s.featured && (
-                  <span className="rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-semibold text-amber-300">
-                    FEATURED
-                  </span>
-                )}
-                {s.warning && (
-                  <span className="rounded-full bg-rose-500/20 px-2 py-0.5 text-[10px] font-semibold text-rose-300">
-                    ANARCHY
-                  </span>
-                )}
+            <div className="glass flex items-end gap-3 rounded-2xl p-4">
+              <div className="flex-1">
+                <div className="mb-1 text-xs text-muted-foreground">Server Name</div>
+                <input
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+                  placeholder="My SMP"
+                  className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none"
+                />
               </div>
-              <div className="text-xs text-muted-foreground">
-                {s.ip} · {s.version}
+              <div className="flex-1">
+                <div className="mb-1 text-xs text-muted-foreground">Address</div>
+                <input
+                  value={newAddr}
+                  onChange={(e) => setNewAddr(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+                  placeholder="mc.example.com:25565"
+                  className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none font-mono"
+                />
               </div>
-            </div>
-            <div className="hidden text-right md:block">
-              <div className="text-xs text-muted-foreground">Players</div>
-              <div className="font-mono text-sm font-semibold">
-                {s.players.toLocaleString()} / {s.max.toLocaleString()}
-              </div>
-            </div>
-            <div className="hidden text-right md:block">
-              <div className="text-xs text-muted-foreground">Ping</div>
-              <div
-                className={`font-mono text-sm font-semibold ${s.ping < 50 ? "text-emerald-400" : s.ping < 80 ? "text-amber-400" : "text-rose-400"}`}
+              <button
+                onClick={handleAdd}
+                disabled={!newName.trim() || !newAddr.trim()}
+                className="rounded-xl gradient-primary px-5 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-40"
               >
-                {s.ping} ms
-              </div>
+                Save
+              </button>
             </div>
-            <button className="flex items-center gap-2 rounded-xl gradient-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:scale-105">
-              <Play className="h-4 w-4 fill-current" /> Join
-            </button>
           </motion.div>
-        ))}
-      </div>
+        )}
+      </AnimatePresence>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading servers…
+        </div>
+      ) : serversList.length === 0 ? (
+        <div className="flex flex-col items-center gap-3 py-20 text-muted-foreground">
+          <ServerIcon className="h-12 w-12 opacity-30" />
+          <p className="text-sm">No servers yet. Add one to get started.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4">
+          {serversList.map((s) => {
+            const ping = pings[s.address];
+            const pingStyle = ping != null
+              ? ping < 50 ? "text-emerald-400"
+                : ping < 100 ? "text-amber-400"
+                : "text-rose-400"
+              : "text-muted-foreground";
+            const isRenaming = renameId === s.address;
+            return (
+              <motion.div
+                key={s.address}
+                layout
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="glass flex items-center gap-5 rounded-2xl p-5"
+              >
+                <div className="grid h-14 w-14 place-items-center rounded-xl gradient-primary">
+                  <ServerIcon className="h-6 w-6 text-primary-foreground" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  {isRenaming ? (
+                    <input
+                      value={renameVal}
+                      onChange={(e) => setRenameVal(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleRename(s.address);
+                        if (e.key === 'Escape') setRenameId(null);
+                      }}
+                      onBlur={() => handleRename(s.address)}
+                      className="w-full rounded-md border border-white/20 bg-white/5 px-2 py-0.5 font-display text-lg font-semibold outline-none"
+                      autoFocus
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span className="font-display text-lg font-semibold">{s.name}</span>
+                      <button
+                        onClick={() => { setRenameId(s.address); setRenameVal(s.name); }}
+                        className="rounded-lg p-1 text-muted-foreground hover:bg-white/10"
+                        title="Rename"
+                      >
+                        <Edit className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
+                  <div className="text-xs text-muted-foreground">{s.address}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs text-muted-foreground">Ping</div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handlePing(s.address)}
+                      className="rounded-lg bg-white/5 p-1.5 text-xs hover:bg-white/10"
+                      title="Ping"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                    </button>
+                    <span className={`font-mono text-sm font-semibold ${pingStyle}`}>
+                      {ping != null ? `${ping} ms` : "—"}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleJoin(s.address)}
+                  disabled={launching || gameRunning}
+                  className="flex items-center gap-2 rounded-xl gradient-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:scale-105 disabled:opacity-50 disabled:hover:scale-100"
+                >
+                  {launching ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : gameRunning ? (
+                    <span className="relative flex h-2 w-2">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
+                    </span>
+                  ) : (
+                    <Play className="h-4 w-4 fill-current" />
+                  )} {launching ? "Launching…" : gameRunning ? "Playing" : "Join"}
+                </button>
+                <button
+                  onClick={() => handleRemove(s.address)}
+                  className="rounded-xl border border-white/10 bg-white/5 p-2.5 text-muted-foreground hover:border-red-500/30 hover:bg-red-500/10 hover:text-red-300"
+                  title="Remove"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </motion.div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -1885,24 +2740,47 @@ const severityStyle: Record<
 };
 
 function CrashLogsView() {
-  const [selected, setSelected] = useState<CrashEntry>(crashLogs[0]);
+  const [entries, setEntries] = useState<CrashEntry[]>([]);
+  const [selected, setSelected] = useState<CrashEntry | null>(null);
   const [tab, setTab] = useState<"game" | "launcher">("game");
   const [copied, setCopied] = useState(false);
   const [filter, setFilter] = useState<"all" | CrashEntry["severity"]>("all");
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/logs`);
+      const data: CrashEntry[] = await res.json();
+      setEntries(data);
+      setSelected((s) => (s ? data.find((e) => e.id === s.id) ?? data[0] : data[0]));
+    } catch {
+      setSelected(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
 
   const list =
     filter === "all"
-      ? crashLogs
-      : crashLogs.filter((c) => c.severity === filter);
-  const active = list.includes(selected) ? selected : (list[0] ?? crashLogs[0]);
-  const logText = tab === "game" ? active.gameLog : active.launcherLog;
+      ? entries
+      : entries.filter((c) => c.severity === filter);
+  const active = list.includes(selected as CrashEntry) ? (selected as CrashEntry) : (list[0] ?? null);
+  const logText = active ? (tab === "game" ? active.gameLog : active.launcherLog) : "";
 
   const copy = async () => {
+    if (!active) return;
     try {
       await navigator.clipboard.writeText(logText);
       setCopied(true);
       setTimeout(() => setCopied(false), 1400);
     } catch {}
+  };
+
+  const openFolder = () => {
+    fetch(`${API_BASE}/logs/open-folder`);
   };
 
   return (
@@ -1912,11 +2790,11 @@ function CrashLogsView() {
         subtitle="Every failed launch is captured here — inspect stack traces, compare launcher and game logs, and share."
         action={
           <div className="flex items-center gap-2">
-            <button className="glass flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium hover:bg-white/10">
+            <button onClick={openFolder} className="glass flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium hover:bg-white/10">
               <Folder className="h-3.5 w-3.5" /> Open folder
             </button>
-            <button className="flex items-center gap-1.5 rounded-full gradient-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground">
-              <RefreshCw className="h-3.5 w-3.5" /> Refresh
+            <button onClick={load} disabled={loading} className="flex items-center gap-1.5 rounded-full gradient-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground disabled:opacity-50">
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
             </button>
           </div>
         }
@@ -1938,7 +2816,12 @@ function CrashLogsView() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,320px)_1fr]">
+      {!active ? (
+        <div className="glass rounded-2xl p-12 text-center">
+          <div className="text-lg font-semibold text-muted-foreground">No crash logs yet</div>
+          <div className="mt-1 text-sm text-muted-foreground/60">Crash reports will appear here after a failed launch.</div>
+        </div>
+      ) : (<div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,320px)_1fr]">
         {/* List */}
         <div className="glass overflow-hidden rounded-2xl">
           {list.length === 0 && (
@@ -2072,7 +2955,7 @@ function CrashLogsView() {
             })}
           </pre>
         </div>
-      </div>
+      </div>)}
     </div>
   );
 }
@@ -2118,6 +3001,7 @@ function LogTab({
 
 function ModpacksView({ modpacks: mp }: { modpacks: ReturnType<typeof useModpacks> }) {
   const [query, setQuery] = useState("");
+  const { openCreateModal, createModal } = useModpackCreateModal(mp);
 
   const filtered = mp.modpacks.filter((m) =>
     m.name.toLowerCase().includes(query.toLowerCase()),
@@ -2128,6 +3012,14 @@ function ModpacksView({ modpacks: mp }: { modpacks: ReturnType<typeof useModpack
       <Header
         title="Modpacks"
         subtitle="Your modpacks — launch-ready configurations with version and loader settings."
+        action={
+          <button
+            onClick={openCreateModal}
+            className="flex items-center gap-1.5 rounded-full gradient-primary px-4 py-2 text-xs font-medium text-primary-foreground"
+          >
+            <Plus className="h-3 w-3" /> Create Modpack
+          </button>
+        }
       />
 
       <div className="flex items-center gap-3">
@@ -2145,64 +3037,54 @@ function ModpacksView({ modpacks: mp }: { modpacks: ReturnType<typeof useModpack
         </span>
       </div>
 
-      {filtered.length === 0 ? (
+      {filtered.length === 0 && mp.modpacks.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-3 py-20 text-muted-foreground">
           <Boxes className="h-12 w-12 opacity-30" />
-          <p className="text-sm">No modpacks yet. Create one from the Home or Versions tab.</p>
+          <p className="text-sm">No modpacks yet. Create one above or from the Home tab.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {filtered.map((m) => (
-            <motion.div
-              key={m.id}
-              whileHover={{ y: -4 }}
-              className="glass group relative flex flex-col overflow-hidden rounded-2xl p-5"
-            >
-              <div className="mb-4 flex items-start justify-between gap-3">
-                <div className="flex items-start gap-3">
-                  <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl gradient-primary">
-                    <Boxes className="h-6 w-6 text-primary-foreground" />
+        <>
+          {mp.modpacks.length > 0 && (
+            <>
+              <div className="mb-1 text-[10px] uppercase tracking-widest text-muted-foreground">Your Modpacks</div>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {filtered.map((m) => (
+                  <ModpackCard key={m.id} modpack={m} modpacks={mp} />
+                ))}
+              </div>
+            </>
+          )}
+          <div className="mb-1 text-[10px] uppercase tracking-widest text-muted-foreground">Featured</div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {staticModpacks.map((m) => (
+              <motion.div
+                key={m.id}
+                whileHover={{ y: -4 }}
+                className="glass group relative flex items-start gap-4 overflow-hidden rounded-2xl p-5"
+              >
+                {m.icon ? (
+                  <img src={m.icon} className="h-14 w-14 shrink-0 rounded-xl object-cover" />
+                ) : (
+                  <div className="grid h-14 w-14 shrink-0 place-items-center rounded-xl gradient-primary">
+                    <Boxes className="h-7 w-7 text-primary-foreground" />
                   </div>
-                  <div className="min-w-0">
-                    <div className="truncate font-display text-base font-semibold leading-tight">
-                      {m.name}
-                    </div>
-                    <div className="truncate text-[11px] text-muted-foreground">
-                      Created {new Date(m.createdAt).toLocaleDateString()}
-                    </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-display text-base font-semibold">{m.name}</div>
+                  <div className="truncate text-xs text-muted-foreground">{m.author}</div>
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px]">{m.mcVersion}</span>
+                    <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px]">{m.loader}</span>
+                    <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px]">{m.size}</span>
                   </div>
                 </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 text-[11px]">
-                <div className="rounded-md bg-white/[0.03] px-2.5 py-1.5">
-                  <div className="text-[9px] uppercase tracking-widest text-muted-foreground">
-                    MC
-                  </div>
-                  <div className="font-mono">
-                    {m.mcVersion} · {m.loaderType}
-                  </div>
-                </div>
-                <div className="rounded-md bg-white/[0.03] px-2.5 py-1.5">
-                  <div className="text-[9px] uppercase tracking-widest text-muted-foreground">
-                    Mods
-                  </div>
-                  <div className="font-mono">{m.mods.length}</div>
-                </div>
-              </div>
-
-              <div className="mt-4">
-                <button
-                  onClick={() => mp.removeModpack(m.id)}
-                  className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/5 py-2.5 text-xs text-muted-foreground hover:border-red-500/30 hover:bg-red-500/10 hover:text-red-300"
-                >
-                  <Trash2 className="h-3.5 w-3.5" /> Remove
-                </button>
-              </div>
-            </motion.div>
-          ))}
-        </div>
+              </motion.div>
+            ))}
+          </div>
+        </>
       )}
+
+      {createModal}
     </div>
   );
 }

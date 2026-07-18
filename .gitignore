@@ -26,3 +26,8 @@ Thumbs.db
 
 # Tauri generated
 src-tauri/gen/
+
+# Backend runtime logs
+backend/logs/
+*.log
+*.log.gz

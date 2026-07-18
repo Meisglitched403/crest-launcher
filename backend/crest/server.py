@@ -1,14 +1,101 @@
 import json
 import os
+import signal
+import subprocess
 import time
 import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler, HTTPStatus
 from pathlib import Path
+from socketserver import ThreadingMixIn
 
 from . import config, versions
 from .mods import modrinth, manager
+from . import servers
 
 STARTED = time.time()
+_game_pid = None
+
+_EXAMPLE_CRASH = {
+    "id": "example-oom",
+    "title": "OutOfMemoryError — Java heap space",
+    "when": "Example · Today",
+    "version": "1.21.4",
+    "loader": "Fabric 0.16.9",
+    "exit": -1,
+    "severity": "fatal",
+    "cause": "java.lang.OutOfMemoryError: Java heap space",
+    "gameLog": "[14:22:03] [Render thread/INFO]: Setting user: Steve_Player\n[14:22:07] [Render thread/INFO]: [Sodium] Loaded 47 mixins\n[14:22:19] [Worker-Main-3/WARN]: Chunk (12, -7) took 812ms to build\n[14:22:41] [Render thread/ERROR]: Unreported exception thrown!\njava.lang.OutOfMemoryError: Java heap space\n    at net.minecraft.world.chunk.ChunkSection.<init>(ChunkSection.java:42)\n    at net.minecraft.world.chunk.WorldChunk.<init>(WorldChunk.java:118)\n    at me.jellysquid.mods.sodium.client.render.SodiumWorldRenderer.setupTerrain(SodiumWorldRenderer.java:186)\n[14:22:41] [Render thread/INFO]: Stopping!\n[14:22:42] [Render thread/INFO]: Process exited with code -1",
+    "launcherLog": "[14:21:58] [Crest/INFO]: Preparing launch — profile \"Modded 1.21\"\n[14:21:58] [Crest/INFO]: Allocated RAM: 4G (recommended: 8G)\n[14:22:01] [Crest/INFO]: Spawning JVM (Java 21.0.4)\n[14:22:03] [Crest/INFO]: Game window attached (pid 18422)\n[14:22:41] [Crest/WARN]: Game process exited unexpectedly (-1)\n[14:22:41] [Crest/INFO]: Crash report captured → crash-reports/2026-07-14_14.22.41-client.txt",
+}
+
+
+def _log_severity(text):
+    if "FATAL" in text or "OutOfMemory" in text or "unreported exception" in text.lower():
+        return "fatal"
+    if "ERROR" in text or "Exception" in text or "Failed" in text:
+        return "error"
+    return "warn"
+
+
+def _gather_logs():
+    entries = [_EXAMPLE_CRASH]
+    seen = {e["id"] for e in entries}
+
+    # real game logs from LOGS_DIR
+    for f in sorted(config.LOGS_DIR.glob("*.log"), reverse=True)[:20]:
+        try:
+            text = f.read_text(errors="replace")
+        except OSError:
+            continue
+        lines = text.splitlines()
+        title = lines[0][:80] if lines else f.name
+        name = f.stem
+        if name not in seen:
+            seen.add(name)
+            entries.append({
+                "id": name,
+                "title": title,
+                "when": time.strftime("%b %d · %H:%M", time.localtime(f.stat().st_mtime)),
+                "version": "—",
+                "loader": "—",
+                "exit": -1,
+                "severity": _log_severity(text),
+                "cause": title,
+                "gameLog": text,
+                "launcherLog": text,
+            })
+
+    # Minecraft crash reports from instances
+    for inst in config.INSTANCES_DIR.iterdir():
+        if not inst.is_dir():
+            continue
+        cr_dir = inst / "crash-reports"
+        if not cr_dir.exists():
+            continue
+        for cr in sorted(cr_dir.glob("*.txt"), reverse=True)[:10]:
+            try:
+                text = cr.read_text(errors="replace")
+            except OSError:
+                continue
+            cid = cr.stem
+            if cid not in seen:
+                seen.add(cid)
+                lines = text.splitlines()
+                title = next((l for l in lines if "Error" in l or "Exception" in l or "Fatal" in l), lines[0][:80])[:80]
+                entries.append({
+                    "id": cid,
+                    "title": title,
+                    "when": time.strftime("%b %d · %H:%M", time.localtime(cr.stat().st_mtime)),
+                    "version": "—",
+                    "loader": "—",
+                    "exit": -1,
+                    "severity": "fatal" if "fatal" in text.lower() else "error",
+                    "cause": lines[0][:120] if lines else title,
+                    "gameLog": text,
+                    "launcherLog": "",
+                })
+
+    return entries
 
 
 def _body(handler):
@@ -56,6 +143,16 @@ class Handler(BaseHTTPRequestHandler):
 
         if parts == ["api", "game-dir"]:
             return _json(self, {"path": str(config.INSTANCES_DIR)})
+
+        if parts == ["api", "game", "status"]:
+            alive = False
+            if _game_pid:
+                try:
+                    os.kill(_game_pid, 0)
+                    alive = True
+                except (OSError, ProcessLookupError):
+                    pass
+            return _json(self, {"pid": _game_pid, "alive": alive})
 
         if parts == ["api", "java", "ensure"]:
             from . import java as jmod
@@ -117,6 +214,7 @@ class Handler(BaseHTTPRequestHandler):
                     qs.get("game_version"),
                     qs.get("loader"),
                     int(qs.get("limit", 20)),
+                    qs.get("categories"),
                 )
                 return _json(self, results)
             except Exception as e:
@@ -131,9 +229,63 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 return _json(self, [])
 
+        if parts == ["api", "mods", "untracked"]:
+            mp = qs.get("modpack", "")
+            if not mp:
+                return _err(self, "modpack required")
+            return _json(self, manager.untracked_mods(mp))
+
+        if parts == ["api", "mods", "open-folder"]:
+            mp = qs.get("modpack", "")
+            if not mp:
+                return _err(self, "modpack required")
+            folder = config.INSTANCES_DIR / mp / "mods"
+            if folder.exists():
+                subprocess.Popen(["xdg-open", str(folder)])
+                return _json(self, {"status": "ok"})
+            else:
+                return _err(self, "mods folder not found", 404)
+
+        if parts == ["api", "servers"]:
+            return _json(self, servers.list_all())
+
+        if parts == ["api", "accounts", "session"]:
+            from . import accounts as accts
+            sess = accts.get_session()
+            return _json(self, sess if sess else {})
+
+        if parts == ["api", "accounts", "check"]:
+            from . import accounts as accts
+            name = qs.get("name", "")
+            if not name:
+                return _err(self, "name required")
+            return _json(self, accts.check_availability(name))
+
+        if parts == ["api", "icon"]:
+            slug = qs.get("project", "")
+            if not slug:
+                return _err(self, "project required")
+            try:
+                proj = modrinth.get_project(slug)
+                return _json(self, {"icon_url": proj.get("icon_url")})
+            except Exception as e:
+                return _json(self, {"icon_url": None})
+
+        if parts == ["api", "logs", "open-folder"]:
+            subprocess.Popen(["xdg-open", str(config.LOGS_DIR)])
+            return _json(self, {"status": "ok"})
+
+        if parts == ["api", "logs"]:
+            return _json(self, _gather_logs())
+
+        if len(parts) == 4 and parts[:3] == ["api", "servers", "ping"]:
+            addr = urllib.parse.unquote(parts[3])
+            return _json(self, servers.ping(addr))
+
         return _err(self, f"Not found: {self.path}", 404)
 
     def do_POST(self):
+        global _game_pid
         parts, qs = _parse(self.path)
         body = _body(self)
 
@@ -164,16 +316,65 @@ class Handler(BaseHTTPRequestHandler):
                     return _err(self, str(e))
                 return _json(self, {"id": vid, "mc_version": vid, "loader_type": "vanilla"})
 
+        if parts == ["api", "accounts", "signup"]:
+            from . import accounts as accts
+            email = body.get("email", "")
+            username = body.get("username", "")
+            display_name = body.get("displayName", "")
+            password = body.get("password", "")
+            if not email or not username or not display_name or not password:
+                return _err(self, "email, username, displayName, password required")
+            try:
+                return _json(self, accts.signup(email, username, display_name, password))
+            except ValueError as e:
+                return _err(self, str(e))
+
+        if parts == ["api", "accounts", "login"]:
+            from . import accounts as accts
+            email = body.get("email", "")
+            password = body.get("password", "")
+            if not email or not password:
+                return _err(self, "email and password required")
+            try:
+                return _json(self, accts.login(email, password))
+            except ValueError as e:
+                return _err(self, str(e))
+
+        if parts == ["api", "accounts", "logout"]:
+            from . import accounts as accts
+            accts.logout()
+            return _json(self, {"status": "ok"})
+
         if parts == ["api", "game", "launch"]:
             vid = body.get("version_id", "")
-            username = body.get("username", "")
             ram_mb = body.get("ram_mb", 4096)
             pname = body.get("profile_name")
-            if not vid or not username:
-                return _err(self, "version_id and username required")
+            server_address = body.get("server_address")
+            account_id = body.get("account_id", "")
+            username = body.get("username", "")
+            if not vid:
+                return _err(self, "version_id required")
 
             from . import auth as amod, launcher as lmod, profiles as pmod
-            a = amod.login_offline(username)
+
+            if account_id:
+                from . import accounts as accts
+                sess = accts.get_session()
+                if not sess:
+                    return _err(self, "Not logged in")
+                account = sess["account"]
+                if account["id"] != account_id:
+                    account = accts.get_account(account_id, sess["jwt"])
+                    if not account:
+                        return _err(self, "Account not found")
+                a = amod.crest_account_auth(account)
+                display_name = account["display_name"]
+            elif username:
+                a = amod.login_offline(username)
+                display_name = username
+            else:
+                return _err(self, "account_id or username required")
+
             if pname:
                 try:
                     p = pmod.get_profile(pname)
@@ -181,15 +382,18 @@ class Handler(BaseHTTPRequestHandler):
                     p = pmod.create_profile(pname, vid, modloader="fabric" if "fabric-loader" in vid else None)
                 p["version"] = vid
                 p["java_args"] = [f"-Xmx{ram_mb}M"]
+                if server_address:
+                    p["server_address"] = server_address
                 pmod._save(p)
                 try:
-                    pid = lmod.launch_async(pname, a)
+                    pid = lmod.launch_async(pname, a, server_address=server_address)
+                    _game_pid = pid
                 except Exception as e:
                     return _err(self, str(e))
                 return _json(self, {"pid": pid})
             else:
                 from . import launcher as lmod
-                pname = f"_tmp_{username}_{vid.replace('.', '_')}"
+                pname = f"_tmp_{display_name}_{vid.replace('.', '_')}"
                 try:
                     pmod.get_profile(pname)
                 except ValueError:
@@ -197,12 +401,25 @@ class Handler(BaseHTTPRequestHandler):
                 p = pmod.get_profile(pname)
                 p["version"] = vid
                 p["java_args"] = [f"-Xmx{ram_mb}M"]
+                if server_address:
+                    p["server_address"] = server_address
                 pmod._save(p)
                 try:
-                    pid = lmod.launch_async(pname, a)
+                    pid = lmod.launch_async(pname, a, server_address=server_address)
+                    _game_pid = pid
                 except Exception as e:
                     return _err(self, str(e))
                 return _json(self, {"pid": pid})
+
+        if parts == ["api", "game", "kill"]:
+            killed = False
+            if _game_pid:
+                try:
+                    os.kill(_game_pid, signal.SIGTERM)
+                    killed = True
+                except (OSError, ProcessLookupError):
+                    pass
+            return _json(self, {"killed": killed})
 
         if parts == ["api", "mods", "install"]:
             mp = body.get("modpack", "")
@@ -252,6 +469,17 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return _err(self, str(e))
 
+        if parts == ["api", "mods", "adopt"]:
+            mp = body.get("modpack", "")
+            filename = body.get("filename", "")
+            if not mp or not filename:
+                return _err(self, "modpack and filename required")
+            try:
+                r = manager.adopt_mod(mp, filename)
+                return _json(self, r)
+            except Exception as e:
+                return _err(self, str(e))
+
         if parts == ["api", "instance", "create"]:
             name = body.get("name", "")
             mc_ver = body.get("mc_version", "")
@@ -267,11 +495,34 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return _err(self, str(e))
 
+        if parts == ["api", "servers", "add"]:
+            name = body.get("name", "")
+            address = body.get("address", "")
+            if not name or not address:
+                return _err(self, "name and address required")
+            try:
+                r = servers.add(name, address)
+                return _json(self, r)
+            except ValueError as e:
+                return _err(self, str(e), 409)
+
+        if parts == ["api", "servers", "remove"]:
+            address = body.get("address", "")
+            if not address:
+                return _err(self, "address required")
+            servers.remove(address)
+            return _json(self, {"status": "ok"})
+
         return _err(self, f"Not found: {self.path}", 404)
 
 
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    pass
+
+
 def serve(host="127.0.0.1", port=8765):
-    server = HTTPServer((host, port), Handler)
+    server = ThreadingHTTPServer((host, port), Handler)
+    server.daemon_threads = True
     print(f"Crest API on http://{host}:{port}")
     try:
         server.serve_forever()

@@ -185,73 +185,6 @@ export type CrashEntry = {
   launcherLog: string;
 };
 
-export const crashLogs: CrashEntry[] = [
-  {
-    id: "crash-2026-07-14-1",
-    title: "OutOfMemoryError — Java heap space",
-    when: "Today · 14:22",
-    version: "1.21.4",
-    loader: "Fabric 0.16.9",
-    exit: -1,
-    severity: "fatal",
-    cause: "java.lang.OutOfMemoryError: Java heap space",
-    gameLog: `[14:22:03] [Render thread/INFO]: Setting user: Steve_Player
-[14:22:07] [Render thread/INFO]: [Sodium] Loaded 47 mixins
-[14:22:19] [Worker-Main-3/WARN]: Chunk (12, -7) took 812ms to build
-[14:22:41] [Render thread/ERROR]: Unreported exception thrown!
-java.lang.OutOfMemoryError: Java heap space
-    at net.minecraft.world.chunk.ChunkSection.<init>(ChunkSection.java:42)
-    at net.minecraft.world.chunk.WorldChunk.<init>(WorldChunk.java:118)
-    at net.minecraft.server.world.ServerChunkManager.loadChunk(ServerChunkManager.java:214)
-    at me.jellysquid.mods.sodium.client.render.SodiumWorldRenderer.setupTerrain(SodiumWorldRenderer.java:186)
-    at net.minecraft.client.render.WorldRenderer.render(WorldRenderer.java:1024)
-[14:22:41] [Render thread/INFO]: Stopping!
-[14:22:42] [Render thread/INFO]: Process exited with code -1`,
-    launcherLog: `[14:21:58] [Crest/INFO]: Preparing launch — profile "Modded 1.21"
-[14:21:58] [Crest/INFO]: Allocated RAM: 4G (recommended: 8G)
-[14:21:59] [Crest/INFO]: Assembling classpath — 62 libraries
-[14:22:01] [Crest/INFO]: Spawning JVM (Java 21.0.4)
-[14:22:03] [Crest/INFO]: Game window attached (pid 18422)
-[14:22:41] [Crest/WARN]: Game process exited unexpectedly (-1)
-[14:22:41] [Crest/INFO]: Crash report captured → crash-reports/2026-07-14_14.22.41-client.txt`,
-  },
-  {
-    id: "crash-2026-07-13-2",
-    title: "Mixin transformation failed — sodium ⇢ create",
-    when: "Yesterday · 21:07",
-    version: "1.20.1",
-    loader: "Forge 47.3.0",
-    exit: 1,
-    severity: "error",
-    cause: "org.spongepowered.asm.mixin.throwables.MixinApplyError",
-    gameLog: `[21:07:11] [main/INFO]: ModLauncher running: args [--launchTarget, forgeclient]
-[21:07:14] [main/ERROR]: Mixin apply failed sodium.mixins.json:features.chunk.ChunkBuilderMixin
-org.spongepowered.asm.mixin.throwables.MixinApplyError: Mixin [sodium] from phase [DEFAULT] in config [sodium.mixins.json] FAILED during APPLY
-    Caused by: java.lang.ClassCastException: class com.simibubi.create.foundation.render.ChunkBufferBuilder cannot be cast to net.minecraft.client.render.chunk.BuiltChunk
-[21:07:14] [main/FATAL]: Failed to start Minecraft`,
-    launcherLog: `[21:07:08] [Crest/INFO]: Launching profile "Create SMP"
-[21:07:14] [Crest/ERROR]: Detected incompatible mods: Sodium 0.5.3 ↔ Create 6.0.2
-[21:07:14] [Crest/INFO]: Suggested fix: use Embeddium instead of Sodium on Forge
-[21:07:14] [Crest/INFO]: Process exited (1)`,
-  },
-  {
-    id: "crash-2026-07-10-3",
-    title: "Missing native library — glfw",
-    when: "Jul 10 · 09:34",
-    version: "1.16.5",
-    loader: "Vanilla",
-    exit: -1073741515,
-    severity: "warn",
-    cause: "UnsatisfiedLinkError: no glfw in java.library.path",
-    gameLog: `[09:34:02] [main/ERROR]: java.lang.UnsatisfiedLinkError: no glfw in java.library.path
-    at java.base/java.lang.ClassLoader.loadLibrary(ClassLoader.java:2434)
-    at org.lwjgl.glfw.GLFW.<clinit>(GLFW.java:614)
-[09:34:02] [main/INFO]: Native libraries missing — will re-download on next launch.`,
-    launcherLog: `[09:33:58] [Crest/INFO]: Verifying assets for 1.16.5
-[09:34:00] [Crest/WARN]: 2 native libraries missing (glfw, openal)
-[09:34:02] [Crest/INFO]: Auto-repair queued`,
-  },
-];
 
 /* -------- Modpacks -------- */
 export type ModpackStatus =
@@ -261,6 +194,7 @@ export type Modpack = {
   name: string;
   author: string;
   desc: string;
+  icon?: string;
   version: string;
   installedVersion?: string;
   mcVersion: string;
@@ -295,6 +229,7 @@ export const modpacks: Modpack[] = [
     name: "Better Minecraft [FABRIC]",
     author: "SHXRKIE",
     desc: "Vanilla+ overhaul — new biomes, structures, mobs and quality-of-life polish.",
+    icon: "https://cdn.modrinth.com/data/shFhR8Vx/a19c2bcb51d38f32f138d3607e91cb2b7b8e387f_96.webp",
     version: "7.1",
     installedVersion: "7.1",
     mcVersion: "1.21.4",
@@ -326,6 +261,7 @@ export const modpacks: Modpack[] = [
     name: "Prominence II RPG: Hasturian Era",
     author: "Hypnootic",
     desc: "Full-blown Fabric RPG — classes, dungeons, bosses, and MMO-style progression.",
+    icon: "https://cdn.modrinth.com/data/EGs3lC8D/00f31f1b678ed4cf3aee8c3aee79889afb4b8a1c_96.webp",
     version: "3.1.16",
     mcVersion: "1.20.1",
     loader: "Fabric",
@@ -362,6 +298,7 @@ export const modpacks: Modpack[] = [
     name: "Simply Optimized",
     author: "Sk1er",
     desc: "Pure performance pack — 600+ FPS, zero content changes. Perfect vanilla+.",
+    icon: "https://cdn.modrinth.com/data/Aa5L6RtV/2d323306d1e5909c81b3da0d57e9899383106f77_96.webp",
     version: "1.21.4-a",
     installedVersion: "1.21.4-a",
     mcVersion: "1.21.4",

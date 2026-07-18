@@ -139,3 +139,12 @@ def logout():
 
 def _save(auth):
     config.AUTH_FILE.write_text(json.dumps(auth, indent=2))
+
+
+def crest_account_auth(account):
+    return {
+        "type": "crest",
+        "username": account["display_name"],
+        "uuid": account["mc_uuid"],
+        "access_token": uuid.uuid4().hex,
+    }

@@ -23,7 +23,7 @@ def _token_replace(val, tokens):
     return val
 
 
-def launch(profile_name, auth=None):
+def launch(profile_name, auth=None, server_address=None):
     profile = profiles.get_profile(profile_name)
     if not auth:
         from . import auth as auth_mod
@@ -34,6 +34,8 @@ def launch(profile_name, auth=None):
     mc_version = profile["version"]
     modloader = profile.get("modloader")
     modloader_ver = profile.get("modloader_version")
+    if server_address:
+        profile["server_address"] = server_address
 
     # ponytail: extract real MC version from Fabric IDs like "fabric-loader-0.19.3-26.1.2"
     if modloader == "fabric" and not re.match(r"^\d+\.\d+", mc_version):
@@ -110,7 +112,7 @@ def launch(profile_name, auth=None):
         "${resolution_height}": str(height),
         "${quickPlayPath}": "",
         "${quickPlaySingleplayer}": "",
-        "${quickPlayMultiplayer}": "",
+        "${quickPlayMultiplayer}": profile.get("server_address", ""),
         "${quickPlayRealms}": "",
     }
 
@@ -187,7 +189,7 @@ def launch(profile_name, auth=None):
     return proc.returncode
 
 
-def launch_async(profile_name, auth=None):
+def launch_async(profile_name, auth=None, server_address=None):
     class AsyncLaunch:
         def __init__(self):
             self.proc = None
@@ -203,6 +205,8 @@ def launch_async(profile_name, auth=None):
         auth = auth_mod.get_auth()
     if not auth:
         raise RuntimeError("Not logged in.")
+    if server_address:
+        profile["server_address"] = server_address
 
     mc_version = profile["version"]
     modloader = profile.get("modloader")
@@ -272,7 +276,7 @@ def launch_async(profile_name, auth=None):
         "${resolution_height}": str(height),
         "${quickPlayPath}": "",
         "${quickPlaySingleplayer}": "",
-        "${quickPlayMultiplayer}": "",
+        "${quickPlayMultiplayer}": profile.get("server_address", ""),
         "${quickPlayRealms}": "",
     }
 

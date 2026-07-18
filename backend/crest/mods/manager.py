@@ -56,6 +56,42 @@ def list_mods(profile_name):
     return profile.get("mods", [])
 
 
+def untracked_mods(profile_name):
+    mods_dir = _mods_dir(profile_name)
+    if not mods_dir.exists():
+        return []
+    profile = profiles.get_profile(profile_name)
+    tracked_filenames = {m["filename"] for m in profile.get("mods", [])}
+    result = []
+    for f in sorted(mods_dir.iterdir()):
+        if f.suffix in (".jar",) and f.name not in tracked_filenames:
+            result.append({"filename": f.name})
+        # also check .jar.disabled files
+        if f.suffix == ".disabled" and f.stem.endswith(".jar") and f.name not in tracked_filenames:
+            filename = f.name.replace(".disabled", "")
+            if filename not in tracked_filenames:
+                result.append({"filename": filename})
+    return result
+
+
+def adopt_mod(profile_name, filename):
+    profile = profiles.get_profile(profile_name)
+    base = filename.replace(".disabled", "")
+    jar_path = _mods_dir(profile_name) / base
+    if not jar_path.exists():
+        raise ValueError(f"File not found: {base}")
+    entry = {
+        "project_id": "",
+        "slug": base.replace(".jar", ""),
+        "version_id": "",
+        "filename": base,
+        "enabled": not filename.endswith(".disabled"),
+    }
+    profile["mods"].append(entry)
+    profiles._save(profile)
+    return entry
+
+
 def toggle_mod(profile_name, slug, enabled=None):
     profile = profiles.get_profile(profile_name)
     entry = next((m for m in profile["mods"] if m["slug"] == slug), None)

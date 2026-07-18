@@ -5,13 +5,18 @@ import requests
 BASE = "https://api.modrinth.com/v2"
 
 
-def search(query, game_version=None, loader=None, limit=20):
+def search(query, game_version=None, loader=None, limit=20, categories=None):
     facets = []
     facets.append(["project_type:mod"])
     if game_version:
         facets.append([f"versions:{game_version}"])
     if loader:
         facets.append([f"categories:{loader}"])
+    if categories:
+        for c in categories.split(","):
+            c = c.strip()
+            if c:
+                facets.append([f"categories:{c}"])
     params = {
         "query": query,
         "limit": limit,
