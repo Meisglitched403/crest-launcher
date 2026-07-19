@@ -15,20 +15,9 @@ import {
   Zap,
 } from "lucide-react";
 import { ViewHeader, SectionRow } from "../parts";
+import { fetchLogs, openLogsFolder, type CrashEntry } from "@/lib/tauri-commands";
 
 export type CrashSeverity = "fatal" | "error" | "warn";
-export type CrashEntry = {
-  id: string;
-  title: string;
-  when: string;
-  version: string;
-  loader: string;
-  exit: number;
-  severity: CrashSeverity;
-  cause: string;
-  gameLog: string;
-  launcherLog: string;
-};
 
 const severityStyle: Record<
   CrashSeverity,
@@ -50,8 +39,7 @@ export function CrashLogsView() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`http://127.0.0.1:8765/api/logs`);
-      const data: CrashEntry[] = await res.json();
+      const data = await fetchLogs();
       setEntries(data);
       setSelected((s) => (s ? data.find((e) => e.id === s.id) ?? data[0] : data[0]));
     } catch { setSelected(null); }
@@ -77,7 +65,7 @@ export function CrashLogsView() {
         subtitle="Every failed launch is captured — inspect stack traces, compare launcher and game logs."
         action={
           <div className="flex items-center gap-2">
-            <button onClick={() => fetch(`http://127.0.0.1:8765/api/logs/open-folder`)} className="glass flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium hover:bg-white/10">
+            <button onClick={() => openLogsFolder().catch(() => {})} className="glass flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium hover:bg-white/10">
               <Folder className="h-3.5 w-3.5" /> Open folder
             </button>
             <button onClick={load} disabled={loading} className="flex items-center gap-1.5 rounded-full gradient-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground disabled:opacity-50">

@@ -231,3 +231,38 @@ export async function logout(): Promise<void> {
 export async function checkAvailability(name: string): Promise<AvailabilityResult> {
   return api<AvailabilityResult>("GET", `/accounts/check?name=${encodeURIComponent(name)}`);
 }
+
+export interface CrashEntry {
+  id: string;
+  title: string;
+  when: string;
+  version: string;
+  loader: string;
+  exit: number;
+  severity: "fatal" | "error" | "warn";
+  cause: string;
+  gameLog: string;
+  launcherLog: string;
+}
+
+export async function fetchLogs(): Promise<CrashEntry[]> {
+  return api<CrashEntry[]>("GET", "/logs");
+}
+
+export async function openLogsFolder(): Promise<void> {
+  await api<{ status: string }>("GET", "/logs/open-folder");
+}
+
+export interface HealthStatus {
+  status: string;
+  uptime: number;
+}
+
+export async function fetchHealth(): Promise<HealthStatus> {
+  return api<HealthStatus>("GET", "/health");
+}
+
+export async function fetchIcon(project: string): Promise<string | null> {
+  const data = await api<{ icon_url: string | null }>("GET", `/icon?project=${encodeURIComponent(project)}`);
+  return data.icon_url;
+}

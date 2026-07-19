@@ -30,11 +30,8 @@ import {
   removeMod,
   toggleMod,
   installMod,
+  fetchIcon,
 } from "@/lib/tauri-commands";
-
-const API_BASE =
-  (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_URL) ||
-  "http://127.0.0.1:8765/api";
 
 type SearchResult = {
   slug: string;
@@ -136,11 +133,10 @@ export function ModsView({ modpacks }: { modpacks: ModpacksHook }) {
   useEffect(() => {
     for (const m of installedMods) {
       if (modIcons[m.slug]) continue;
-      fetch(`${API_BASE}/icon?project=${m.slug}`)
-        .then((r) => r.json())
-        .then((d: { icon_url?: string }) => {
-          if (d.icon_url)
-            setModIcons((prev) => ({ ...prev, [m.slug]: d.icon_url! }));
+      fetchIcon(m.slug)
+        .then((iconUrl) => {
+          if (iconUrl)
+            setModIcons((prev) => ({ ...prev, [m.slug]: iconUrl }));
         })
         .catch(() => {});
     }
