@@ -159,6 +159,33 @@ export type Cosmetic = {
   equipped?: boolean;
 };
 
+export const newsPreview = [
+  {
+    id: "1",
+    title: "Crest 3.2 — Dual Themes & Command Palette",
+    date: "Jul 18, 2026",
+    tag: "Release",
+    image: "/src/assets/news-1.jpg",
+    excerpt: "Dark + light themes, ⌘K command palette, recharts telemetry, and a full architecture rewrite.",
+  },
+  {
+    id: "2",
+    title: "The Best Fabric Mods for 1.21.4",
+    date: "Jul 12, 2026",
+    tag: "Guide",
+    image: "/src/assets/news-2.jpg",
+    excerpt: "Our curated list of essential Fabric mods — from Sodium to Distant Horizons.",
+  },
+  {
+    id: "3",
+    title: "Season 4 Pass — New Cosmetics",
+    date: "Jul 5, 2026",
+    tag: "Cosmetics",
+    image: "/src/assets/news-3.jpg",
+    excerpt: "Ender Wings, Cyber Katana, and 12 more items drop this season.",
+  },
+];
+
 export const cosmetics: Cosmetic[] = [
   { name: "Ender Wings", type: "Wings", rarity: "Legendary", equipped: true },
   { name: "Diamond Cape", type: "Cape", rarity: "Epic", equipped: true },
