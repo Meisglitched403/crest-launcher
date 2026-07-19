@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { AnimatePresence } from "framer-motion";
 import { X, UserPlus } from "lucide-react";
 import { logout as apiLogout } from "@/lib/tauri-commands";
 import { ThemeProvider, ThemeTrigger } from "./ThemeCustomizer";
 import { AppSidebar, AppTopbar, AmbientBackground, PageTransition } from "./layout";
+import { CommandPalette } from "./modals/CommandPalette";
 import { HomeView } from "./views/HomeView";
 import { VersionsView } from "./views/VersionsView";
 import { ModpacksView } from "./views/ModpackCard";
@@ -32,6 +33,19 @@ export function CrestLauncher() {
   const [launching, setLaunching] = useState(false);
   const [gameRunning, setGameRunning] = useState(false);
   const [backendOnline, setBackendOnline] = useState(false);
+  const [commandOpen, setCommandOpen] = useState(false);
+
+  // Global ⌘K / Ctrl+K handler
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setCommandOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   useEffect(() => {
     fetch("http://127.0.0.1:8765/api/health", { signal: new AbortController().signal })
@@ -58,6 +72,15 @@ export function CrestLauncher() {
     setSession(null);
   };
 
+  const handleLaunch = useCallback(() => {
+    setLaunching(true);
+    // Simulated launch — real impl lives in HomeView
+    setTimeout(() => {
+      setLaunching(false);
+      setGameRunning(true);
+    }, 3000);
+  }, []);
+
   return (
     <ThemeProvider>
       <div className="relative min-h-screen overflow-hidden bg-background text-foreground">
@@ -75,6 +98,7 @@ export function CrestLauncher() {
               backendOnline={backendOnline}
               onLoginClick={() => setShowLoginModal(true)}
               onLogout={handleLogout}
+              onCommandOpen={() => setCommandOpen(true)}
             />
             <main className="flex-1 px-8 pb-8">
               <PageTransition active={active}>
@@ -124,6 +148,19 @@ export function CrestLauncher() {
             />
           )}
         </AnimatePresence>
+
+        <CommandPalette
+          open={commandOpen}
+          onClose={() => setCommandOpen(false)}
+          activeNav={active}
+          onNavigate={setActive}
+          launching={launching}
+          gameRunning={gameRunning}
+          onLaunch={handleLaunch}
+          onLoginClick={() => { setShowLoginModal(true); }}
+          hasSession={!!session}
+          onLogout={handleLogout}
+        />
       </div>
     </ThemeProvider>
   );

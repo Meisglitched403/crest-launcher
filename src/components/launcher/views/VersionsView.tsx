@@ -16,6 +16,7 @@ import {
   GhostButton,
   IconButton,
 } from "@/components/launcher/parts";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { installVersion } from "@/lib/tauri-commands";
 import type { ModpacksHook } from "@/components/launcher/lib/types";
 import type { LiveVersion, LoaderType } from "@/lib/minecraft-api";
@@ -103,7 +104,8 @@ export function VersionsView({ modpacks }: { modpacks: ModpacksHook }) {
             ))}
           </div>
 
-          <div className="glass overflow-hidden rounded-2xl">
+          <ScrollArea className="glass rounded-2xl max-h-[600px]">
+            <div>
             {shown.length === 0 && (
               <div className="p-6 text-center text-sm text-muted-foreground">
                 No versions match this filter.
@@ -184,6 +186,7 @@ export function VersionsView({ modpacks }: { modpacks: ModpacksHook }) {
               );
             })}
           </div>
+          </ScrollArea>
           {shown.length > 50 && (
             <div className="text-center text-xs text-muted-foreground">
               Showing 50 of {shown.length} versions

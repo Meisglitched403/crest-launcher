@@ -25,6 +25,7 @@ import type { ModpacksHook } from "@/components/launcher/lib/types";
    - Account dropdown with avatar/initials
    ---------------------------------------------------------------------------- */
 export function AppTopbar({
+  profiles,
   modpacks,
   launching,
   gameRunning,
@@ -33,6 +34,7 @@ export function AppTopbar({
   backendOnline,
   onLoginClick,
   onLogout,
+  onCommandOpen,
 }: {
   profiles: { profiles: { id: string; username: string }[]; activeId: string | null };
   modpacks: ModpacksHook;
@@ -43,23 +45,26 @@ export function AppTopbar({
   backendOnline: boolean;
   onLoginClick: () => void;
   onLogout: () => void;
+  onCommandOpen: () => void;
 }) {
   const [profileOpen, setProfileOpen] = useState(false);
   const initials = (name: string) => name.slice(0, 2).toUpperCase();
 
   return (
     <header className="sticky top-0 z-20 flex items-center gap-4 px-8 py-5">
-      {/* Search pill */}
-      <div className="glass flex flex-1 items-center gap-2 rounded-full px-4 py-2.5">
-        <Search className="h-4 w-4 text-muted-foreground" />
-        <input
-          placeholder="Search mods, servers, versions, friends…"
-          className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-        />
-        <kbd className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+      {/* Search pill — triggers command palette */}
+      <button
+        onClick={onCommandOpen}
+        className="glass flex flex-1 items-center gap-2 rounded-full px-4 py-2.5 text-left transition hover:bg-white/[0.06]"
+      >
+        <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <span className="w-full text-sm text-muted-foreground">
+          Search mods, servers, versions, friends…
+        </span>
+        <kbd className="shrink-0 rounded bg-white/10 px-1.5 py-0.5 text-[10px] text-muted-foreground">
           ⌘K
         </kbd>
-      </div>
+      </button>
 
       {/* Theme + Bell */}
       <ThemeTrigger />

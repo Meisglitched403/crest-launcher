@@ -22,6 +22,7 @@ import {
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { StatBar } from "@/components/launcher/parts";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTheme } from "@/components/launcher/ThemeCustomizer";
 import logo from "@/assets/logo.png";
 
@@ -118,7 +119,8 @@ export function AppSidebar({
       </button>
 
       {/* Nav */}
-      <nav className="mt-2 flex flex-1 flex-col gap-1 overflow-y-auto">
+      <ScrollArea className="mt-2 flex-1">
+        <nav className="flex flex-col gap-1">
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = active === item.id;
@@ -155,6 +157,7 @@ export function AppSidebar({
           );
         })}
       </nav>
+      </ScrollArea>
 
       {/* System stats */}
       {!condensed && (
