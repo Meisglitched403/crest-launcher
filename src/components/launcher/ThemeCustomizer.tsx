@@ -6,7 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import { AnimatePresence, MotionConfig, motion } from "framer-motion";
-import { Palette, X, RotateCcw, Check } from "lucide-react";
+import { Palette, X, RotateCcw, Check, Moon, Sun, Monitor } from "lucide-react";
 
 /* -------------------- Presets -------------------- */
 
@@ -110,6 +110,12 @@ const MOTION = [
   { label: "Lively", reduce: false, mult: 1.35 },
 ];
 
+const MODE_LABELS: Record<ThemeMode, string> = {
+  dark: "Dark",
+  light: "Light",
+  system: "Auto",
+};
+
 /* -------------------- Context -------------------- */
 
 type Theme = {
@@ -117,9 +123,18 @@ type Theme = {
   glass: number; // 0..3
   font: number; // 0..3
   motion: number; // 0..3
+  mode: ThemeMode;
 };
 
-const DEFAULT: Theme = { accent: "emerald", glass: 2, font: 1, motion: 2 };
+export type ThemeMode = "dark" | "light" | "system";
+
+const DEFAULT: Theme = {
+  accent: "emerald",
+  glass: 2,
+  font: 1,
+  motion: 2,
+  mode: "dark",
+};
 const KEY = "crest.theme";
 
 type Ctx = Theme & {
@@ -127,6 +142,9 @@ type Ctx = Theme & {
   setGlass: (n: number) => void;
   setFont: (n: number) => void;
   setMotion: (n: number) => void;
+  setMode: (m: ThemeMode) => void;
+  resolvedMode: "dark" | "light";
+  toggleMode: () => void;
   reset: () => void;
   open: () => void;
 };
@@ -141,6 +159,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(DEFAULT);
   const [panelOpen, setPanelOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  const [systemDark, setSystemDark] = useState(true);
 
   // load once after mount (SSR-safe)
   useEffect(() => {
@@ -148,7 +167,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       const raw = localStorage.getItem(KEY);
       if (raw) setTheme({ ...DEFAULT, ...JSON.parse(raw) });
     } catch {}
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    setSystemDark(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setSystemDark(e.matches);
+    mq.addEventListener("change", handler);
     setHydrated(true);
+    return () => mq.removeEventListener("change", handler);
   }, []);
 
   // persist + apply CSS vars
@@ -159,6 +183,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     } catch {}
 
     const root = document.documentElement;
+    // Mode: toggle html class
+    const resolved: "dark" | "light" =
+      theme.mode === "system" ? (systemDark ? "dark" : "light") : theme.mode;
+    root.classList.remove("dark", "light");
+    root.classList.add(resolved);
+
     const a = ACCENTS[theme.accent];
     root.style.setProperty("--primary", a.primary);
     root.style.setProperty("--primary-foreground", a.primaryFg);
@@ -178,7 +208,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
     const m = MOTION[theme.motion];
     root.style.setProperty("--motion-mult", String(m.mult));
-  }, [theme, hydrated]);
+  }, [theme, hydrated, systemDark]);
+
+  const resolvedMode: "dark" | "light" =
+    theme.mode === "system" ? (systemDark ? "dark" : "light") : theme.mode;
 
   const ctx: Ctx = {
     ...theme,
@@ -186,6 +219,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setGlass: (glass) => setTheme((t) => ({ ...t, glass })),
     setFont: (font) => setTheme((t) => ({ ...t, font })),
     setMotion: (motion) => setTheme((t) => ({ ...t, motion })),
+    setMode: (mode) => setTheme((t) => ({ ...t, mode })),
+    resolvedMode,
+    toggleMode: () =>
+      setTheme((t) => ({ ...t, mode: t.mode === "dark" ? "light" : "dark" })),
     reset: () => setTheme(DEFAULT),
     open: () => setPanelOpen(true),
   };
@@ -269,6 +306,44 @@ function CustomizerPanel({
             </div>
 
             <div className="flex-1 space-y-6 overflow-y-auto p-5">
+              {/* Mode */}
+              <Section title="Appearance" hint={MODE_LABELS[t.mode]}>
+                <div className="grid grid-cols-3 gap-2">
+                  {(
+                    [
+                      ["dark", Moon, "Dark"],
+                      ["light", Sun, "Light"],
+                      ["system", Monitor, "Auto"],
+                    ] as const
+                  ).map(([id, Icon, label]) => {
+                    const activeM = t.mode === id;
+                    return (
+                      <button
+                        key={id}
+                        onClick={() => t.setMode(id)}
+                        className={`relative flex flex-col items-center gap-1.5 rounded-xl border px-2 py-3 text-xs font-medium transition ${
+                          activeM
+                            ? "border-primary/50 bg-primary/10 text-primary"
+                            : "border-white/10 text-muted-foreground hover:bg-white/5 hover:text-foreground"
+                        }`}
+                      >
+                        <Icon className="h-4 w-4" />
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <Preview>
+                  <div className="text-xs text-muted-foreground">
+                    Currently showing{" "}
+                    <span className="font-semibold text-foreground">
+                      {t.resolvedMode === "dark" ? "Dark" : "Light"}
+                    </span>{" "}
+                    palette.
+                  </div>
+                </Preview>
+              </Section>
+
               {/* Accent */}
               <Section title="Accent color" hint={ACCENTS[t.accent].label}>
                 <div className="grid grid-cols-6 gap-2">

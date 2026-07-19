@@ -152,7 +152,14 @@ export const friends = [
   },
 ];
 
-export const cosmetics = [
+export type Cosmetic = {
+  name: string;
+  type: string;
+  rarity: string;
+  equipped?: boolean;
+};
+
+export const cosmetics: Cosmetic[] = [
   { name: "Ender Wings", type: "Wings", rarity: "Legendary", equipped: true },
   { name: "Diamond Cape", type: "Cape", rarity: "Epic", equipped: true },
   { name: "Nether Trail", type: "Particles", rarity: "Rare" },

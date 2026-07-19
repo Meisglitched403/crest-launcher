@@ -4,6 +4,10 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ============================================================================
+   THEME TOKEN MAPPING (Tailwind v4 CSS-first)
+   Maps semantic shadcn color tokens to the CSS vars in :root / .dark
+   ============================================================================ */
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -47,16 +51,108 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-elevation-1: var(--elevation-1);
+  --color-elevation-2: var(--elevation-2);
+  --color-elevation-3: var(--elevation-3);
+  --color-elevation-4: var(--elevation-4);
+  --color-elevation-5: var(--elevation-5);
 }
 
+/* ============================================================================
+   THEME MODE FLAG (default = dark)
+   .dark → dark theme
+   .light → light theme (via :root:not(.dark) override)
+   The html element gets className="dark" or "light" from ThemeProvider.
+   ============================================================================ */
 :root {
   --radius: 0.85rem;
-  /* Crest Client — nocturnal emerald + ember palette */
+
+  /* ==========================================================================
+     LIGHT THEME — "Frost" — expanded Material-3 elevation system
+     Defaults selected by default; .dark block overrides for dark mode.
+     The light mode is designed to compete with Modrinth's light theme:
+     hairline glass borders, soft shadows, low-saturation paper surfaces.
+     ========================================================================== */
+  --background: oklch(0.985 0.005 165);
+  --foreground: oklch(0.18 0.02 165);
+  --card: oklch(0.99 0.005 165 / 0.7);
+  --card-foreground: oklch(0.18 0.02 165);
+  --popover: oklch(0.995 0.004 165 / 0.92);
+  --popover-foreground: oklch(0.18 0.02 165);
+  --primary: oklch(0.62 0.16 152);
+  --primary-foreground: oklch(0.99 0.005 165);
+  --secondary: oklch(0.94 0.02 165 / 0.7);
+  --secondary-foreground: oklch(0.21 0.02 165);
+  --muted: oklch(0.93 0.012 165 / 0.5);
+  --muted-foreground: oklch(0.42 0.02 155);
+  --accent: oklch(0.72 0.16 65);
+  --accent-foreground: oklch(0.18 0.03 60);
+  --destructive: oklch(0.55 0.23 28);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(0.3 0.02 165 / 0.1);
+  --input: oklch(0.3 0.02 165 / 0.06);
+  --ring: oklch(0.62 0.16 152);
+  --chart-1: oklch(0.62 0.16 152);
+  --chart-2: oklch(0.72 0.16 65);
+  --chart-3: oklch(0.58 0.17 200);
+  --chart-4: oklch(0.65 0.2 30);
+  --chart-5: oklch(0.6 0.15 320);
+  --sidebar: oklch(0.97 0.01 165 / 0.85);
+  --sidebar-foreground: oklch(0.18 0.02 165);
+  --sidebar-primary: oklch(0.62 0.16 152);
+  --sidebar-primary-foreground: oklch(0.99 0.005 165);
+  --sidebar-accent: oklch(0.93 0.02 165 / 0.7);
+  --sidebar-accent-foreground: oklch(0.18 0.02 165);
+  --sidebar-border: oklch(0.3 0.02 165 / 0.08);
+  --sidebar-ring: oklch(0.62 0.16 152);
+
+  /* Custom tokens */
+  --gradient-primary: linear-gradient(135deg, oklch(0.62 0.16 152), oklch(0.72 0.16 65));
+  --gradient-accent: linear-gradient(135deg, oklch(0.72 0.16 65), oklch(0.65 0.2 30));
+  --gradient-cool: linear-gradient(135deg, oklch(0.62 0.16 152), oklch(0.58 0.17 200));
+  --gradient-surface: radial-gradient(120% 80% at 50% 0%, oklch(0.94 0.02 165 / 0.6), oklch(0.99 0.005 165 / 0));
+  --shadow-glow: 0 0 40px oklch(0.62 0.16 152 / 0.18), 0 0 80px oklch(0.72 0.16 65 / 0.08);
+
+  /* Material-3 elevation system: progressive tonal lift
+     Each level adds a denser ambient color overlay + a deeper shadow.
+     Use for cards, popovers, sheets, etc. */
+  --elevation-1: oklch(0.3 0.02 165 / 0.04);
+  --elevation-2: oklch(0.3 0.02 165 / 0.06);
+  --elevation-3: oklch(0.3 0.02 165 / 0.08);
+  --elevation-4: oklch(0.3 0.02 165 / 0.1);
+  --elevation-5: oklch(0.3 0.02 165 / 0.12);
+  --shadow-elev-1: 0 1px 2px oklch(0 0 0 / 0.05), 0 1px 3px oklch(0 0 0 / 0.04);
+  --shadow-elev-2: 0 2px 4px oklch(0 0 0 / 0.06), 0 3px 6px oklch(0 0 0 / 0.05);
+  --shadow-elev-3: 0 4px 8px oklch(0 0 0 / 0.08), 0 6px 12px oklch(0 0 0 / 0.06);
+  --shadow-elev-4: 0 8px 16px oklch(0 0 0 / 0.1), 0 12px 24px oklch(0 0 0 / 0.08);
+  --shadow-elev-5: 0 16px 32px oklch(0 0 0 / 0.12), 0 24px 48px oklch(0 0 0 / 0.1);
+  --shadow-elevate: var(--shadow-elev-3);
+
+  /* Glass tokens (overridden by ThemeCustomizer) */
+  --glass-opacity: 82%;
+  --glass-blur: 24px;
+
+  /* Scale multipliers (overridden by ThemeCustomizer) */
+  --ui-scale: 1;
+  --motion-mult: 1;
+
+  /* Ambient orb colors */
+  --orb-1: oklch(0.62 0.16 152 / 0.4);
+  --orb-2: oklch(0.72 0.16 65 / 0.3);
+  --grain-opacity: 0.025;
+}
+
+/* ============================================================================
+   DARK THEME — "Crest Nocturne" — refined emerald + ember on dark glass
+   Greeter for the default look. Sandstone glass with ambient neon orbs.
+   ============================================================================ */
+.dark {
+  color-scheme: dark;
   --background: oklch(0.17 0.02 160);
   --foreground: oklch(0.97 0.01 140);
   --card: oklch(0.23 0.025 165 / 0.6);
   --card-foreground: oklch(0.97 0.01 140);
-  --popover: oklch(0.2 0.025 165);
+  --popover: oklch(0.2 0.025 165 / 0.92);
   --popover-foreground: oklch(0.97 0.01 140);
   --primary: oklch(0.74 0.17 152);
   --primary-foreground: oklch(0.16 0.03 160);
@@ -76,7 +172,7 @@
   --chart-3: oklch(0.7 0.18 200);
   --chart-4: oklch(0.72 0.2 30);
   --chart-5: oklch(0.68 0.15 320);
-  --sidebar: oklch(0.14 0.02 160 / 0.75);
+  --sidebar: oklch(0.14 0.02 160 / 0.78);
   --sidebar-foreground: oklch(0.97 0.01 140);
   --sidebar-primary: oklch(0.74 0.17 152);
   --sidebar-primary-foreground: oklch(0.16 0.03 160);
@@ -88,16 +184,37 @@
   --gradient-primary: linear-gradient(135deg, oklch(0.74 0.17 152), oklch(0.78 0.17 65));
   --gradient-accent: linear-gradient(135deg, oklch(0.78 0.17 65), oklch(0.72 0.2 30));
   --gradient-cool: linear-gradient(135deg, oklch(0.74 0.17 152), oklch(0.7 0.18 200));
+  --gradient-surface: radial-gradient(120% 80% at 50% 0%, oklch(0.25 0.04 165 / 0.4), oklch(0.17 0.02 160 / 0));
   --shadow-glow: 0 0 40px oklch(0.74 0.17 152 / 0.28), 0 0 80px oklch(0.78 0.17 65 / 0.12);
-  --shadow-elevate: 0 20px 60px -20px oklch(0 0 0 / 0.6);
+
+  --elevation-1: oklch(1 0 0 / 0.03);
+  --elevation-2: oklch(1 0 0 / 0.05);
+  --elevation-3: oklch(1 0 0 / 0.07);
+  --elevation-4: oklch(1 0 0 / 0.09);
+  --elevation-5: oklch(1 0 0 / 0.11);
+  --shadow-elev-1: 0 1px 2px oklch(0 0 0 / 0.2), 0 1px 3px oklch(0 0 0 / 0.15);
+  --shadow-elev-2: 0 2px 4px oklch(0 0 0 / 0.25), 0 3px 6px oklch(0 0 0 / 0.2);
+  --shadow-elev-3: 0 8px 20px -8px oklch(0 0 0 / 0.5), 0 4px 8px oklch(0 0 0 / 0.3);
+  --shadow-elev-4: 0 16px 36px -12px oklch(0 0 0 / 0.6), 0 8px 16px oklch(0 0 0 / 0.4);
+  --shadow-elev-5: 0 24px 64px -16px oklch(0 0 0 / 0.7), 0 12px 28px oklch(0 0 0 / 0.5);
+  --shadow-elevate: var(--shadow-elev-3);
+
+  --orb-1: oklch(0.74 0.17 152 / 0.45);
+  --orb-2: oklch(0.78 0.17 65 / 0.35);
+  --grain-opacity: 0.04;
 }
 
-.dark {
-  color-scheme: dark;
+.light {
+  color-scheme: light;
 }
 
+/* ============================================================================
+   BASE LAYER
+   ============================================================================ */
 @layer base {
-  * { border-color: var(--color-border); }
+  * {
+    border-color: var(--color-border);
+  }
   html, body { height: 100%; }
   html { font-size: calc(16px * var(--ui-scale, 1)); }
   body {
@@ -105,10 +222,30 @@
     color: var(--color-foreground);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
-  h1, h2, h3, h4, h5 { font-family: var(--font-display); letter-spacing: -0.02em; }
+  h1, h2, h3, h4, h5 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+  }
+  * {
+    scroll-behavior: smooth;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
 }
 
+/* ============================================================================
+   GLASS UTILITIES — Material-3 elevation-aware glassmorphism
+   Level 1 = subtle frosted, Level 5 = heavy frosted with deep shadow.
+   The classic `glass` / `glass-strong` aliases map to levels 2 / 4.
+   ============================================================================ */
 @utility glass {
   background: color-mix(in oklab, var(--card) var(--glass-opacity, 82%), transparent);
   backdrop-filter: blur(var(--glass-blur, 24px)) saturate(160%);
@@ -117,15 +254,64 @@
 }
 
 @utility glass-strong {
-  background: color-mix(in oklab, oklch(0.2 0.03 285) 75%, transparent);
-  backdrop-filter: blur(calc(var(--glass-blur, 24px) + 8px)) saturate(180%);
+  background: color-mix(in oklab, var(--card) calc(var(--glass-opacity, 82%) + 6%), transparent);
+  backdrop-filter: blur(calc(var(--glass-blur, 24px) + 10px)) saturate(180%);
   border: 1px solid oklch(1 0 0 / 0.12);
-  box-shadow: inset 0 1px 0 0 oklch(1 0 0 / 0.08), var(--shadow-elevate);
+  box-shadow: inset 0 1px 0 0 oklch(1 0 0 / 0.08), var(--shadow-elev-4);
 }
 
+@utility glass-elev-1 {
+  background: color-mix(in oklab, var(--card) calc(var(--glass-opacity, 82%) - 12%), transparent);
+  backdrop-filter: blur(calc(var(--glass-blur, 24px) * 0.75)) saturate(150%);
+  border: 1px solid var(--color-border);
+  box-shadow: inset 0 1px 0 0 color-mix(in oklab, var(--primary) 6%, transparent), var(--shadow-elev-1);
+}
 
+@utility glass-elev-2 {
+  background: color-mix(in oklab, var(--card) var(--glass-opacity, 82%), transparent);
+  backdrop-filter: blur(var(--glass-blur, 24px)) saturate(160%);
+  border: 1px solid var(--color-border);
+  box-shadow: inset 0 1px 0 0 color-mix(in oklab, var(--primary) 8%, transparent), var(--shadow-elev-2);
+}
+
+@utility glass-elev-3 {
+  background: color-mix(in oklab, var(--card) calc(var(--glass-opacity, 82%) + 2%), transparent);
+  backdrop-filter: blur(calc(var(--glass-blur, 24px) + 4px)) saturate(165%);
+  border: 1px solid var(--color-border);
+  box-shadow: inset 0 1px 0 0 color-mix(in oklab, var(--primary) 10%, transparent), var(--shadow-elev-3);
+}
+
+@utility glass-elev-4 {
+  background: color-mix(in oklab, var(--card) calc(var(--glass-opacity, 82%) + 6%), transparent);
+  backdrop-filter: blur(calc(var(--glass-blur, 24px) + 8px)) saturate(170%);
+  border: 1px solid oklch(1 0 0 / 0.12);
+  box-shadow: inset 0 1px 0 0 color-mix(in oklab, var(--primary) 12%, transparent), var(--shadow-elev-4);
+}
+
+@utility glass-elev-5 {
+  background: color-mix(in oklab, var(--card) calc(var(--glass-opacity, 82%) + 10%), transparent);
+  backdrop-filter: blur(calc(var(--glass-blur, 24px) + 14px)) saturate(180%);
+  border: 1px solid oklch(1 0 0 / 0.16);
+  box-shadow: inset 0 1px 0 0 color-mix(in oklab, var(--primary) 14%, transparent), var(--shadow-elev-5);
+}
+
+/* ============================================================================
+   GRADIENT / TEXT-GRADIENT UTILITIES
+   ============================================================================ */
 @utility gradient-primary {
   background-image: var(--gradient-primary);
+}
+
+@utility gradient-cool {
+  background-image: var(--gradient-cool);
+}
+
+@utility gradient-accent {
+  background-image: var(--gradient-accent);
+}
+
+@utility gradient-surface {
+  background-image: var(--gradient-surface);
 }
 
 @utility text-gradient {
@@ -135,27 +321,115 @@
   color: transparent;
 }
 
+@utility text-gradient-cool {
+  background-image: var(--gradient-cool);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ============================================================================
+   GLOW / SURFACE TEXTURE UTILITIES
+   ============================================================================ */
 @utility glow {
   box-shadow: var(--shadow-glow);
 }
 
+@utility surface-texture {
+  background-image: var(--gradient-surface), var(--bg-image, none);
+  background-blend-mode: normal, multiply;
+}
+
+/* Subtle noise overlay — uses inline SVG (data-URI) pattern via `.grain` class */
+.grain {
+  position: relative;
+}
+.grain::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: var(--grain-opacity, 0.04);
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.85'/%3E%3C/svg%3E");
+  mix-blend-mode: overlay;
+  border-radius: inherit;
+}
+
+/* ============================================================================
+   AMBIENT BACKGROUND UTILITIES
+   ============================================================================ */
+@utility ambient-orb {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(80px);
+  pointer-events: none;
+  mix-blend-mode: screen;
+  z-index: -10;
+}
+
+/* ============================================================================
+   KEYFRAMES
+   ============================================================================ */
 @keyframes float-orb {
   0%, 100% { transform: translate(0, 0) scale(1); }
   50% { transform: translate(40px, -30px) scale(1.1); }
 }
+
+@keyframes float-orb-alt {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(-50px, 40px) scale(1.15); }
+}
+
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
+
 @keyframes pulse-ring {
   0% { transform: scale(0.95); opacity: 0.7; }
   100% { transform: scale(1.4); opacity: 0; }
 }
 
-.animate-float-orb { animation: float-orb 12s ease-in-out infinite; }
-.animate-pulse-ring { animation: pulse-ring 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 40px oklch(0.74 0.17 152 / 0.28), 0 0 80px oklch(0.78 0.17 65 / 0.12); }
+  50% { box-shadow: 0 0 50px oklch(0.74 0.17 152 / 0.4), 0 0 100px oklch(0.78 0.17 65 / 0.18); }
+}
 
-::-webkit-scrollbar { width: 8px; height: 8px; }
+@keyframes shimmer-load {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-float-orb { animation: float-orb 12s ease-in-out infinite; }
+.animate-float-orb-alt { animation: float-orb-alt 14s ease-in-out infinite; }
+.animate-pulse-ring { animation: pulse-ring 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+.animate-pulse-glow { animation: pulse-glow 3s ease-in-out infinite; }
+
+/* ============================================================================
+   SCROLLBAR — refined thin
+   ============================================================================ */
+::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: oklch(1 0 0 / 0.1); border-radius: 8px; }
-::-webkit-scrollbar-thumb:hover { background: oklch(1 0 0 / 0.2); }
+::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--muted-foreground) 25%, transparent);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklab, var(--muted-foreground) 40%, transparent);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* Focus ring using accent color */
+:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--ring) 70%, transparent);
+  outline-offset: 2px;
+}
+
+/* Selection */
+::selection {
+  background: color-mix(in oklab, var(--primary) 30%, transparent);
+  color: var(--foreground);
+}
